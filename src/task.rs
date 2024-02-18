@@ -1,3 +1,6 @@
+//! Module contains everything related to `Task`, it's `Schedule` and state.
+//!
+//!
 use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error};
 use chrono::Utc;
 use cron::Schedule;
@@ -14,7 +17,7 @@ use tokio::sync::RwLock;
 use tracing::debug;
 use uuid::Uuid;
 
-/// Container for `Task`: id, state, jon function, etc.
+/// `Task` represents single job with it's schedule, attributes and state.
 pub struct Task {
     pub(crate) id: TaskId,
     pub(crate) job: AsyncJobBoxed,
@@ -23,7 +26,25 @@ pub struct Task {
 }
 
 impl Task {
-    /// Creates new Task
+    /// Creates new Task with specified schedule and job function.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use sacs::task::{Task, TaskSchedule};
+    /// use std::time::Duration;
+    /// use tracing::info;
+    ///
+    /// let schedule = TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap());
+    /// let task = Task::new(schedule, |id| {
+    ///     Box::pin(async move {
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(1)).await;
+    ///         // ...
+    ///         info!("Job {id} finished.");
+    ///         })
+    ///     });
+    /// ```
     pub fn new<T>(schedule: TaskSchedule, job: T) -> Self
     where
         T: 'static,

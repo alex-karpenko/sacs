@@ -14,5 +14,5 @@ Cargo.lock
 *.pdb
 
 #
-TDOD.*
+TODO.md
 .vscode/

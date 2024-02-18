@@ -197,7 +197,7 @@ impl Default for Scheduler {
 
 impl TaskScheduler for Scheduler {
     async fn add(&self, task: Task) -> Result<TaskId> {
-        let id = TaskId::default();
+        let id = TaskId::new();
         self.send_event(ChangeStateEvent::EnqueueTask(task)).await?;
         Ok(id)
     }
@@ -272,7 +272,7 @@ mod test {
                     tokio::time::sleep(task_duration).await;
                     log.write().await.push(format!("{},finish,{id}", s));
                 })
-            })?;
+            });
             scheduler.add(task).await?;
             tokio::time::sleep(Duration::from_millis(1)).await;
         }

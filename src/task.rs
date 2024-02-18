@@ -1,4 +1,4 @@
-use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error, Result};
+use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error};
 use chrono::Utc;
 use cron::Schedule;
 use futures::Future;
@@ -14,6 +14,7 @@ use tokio::sync::RwLock;
 use tracing::debug;
 use uuid::Uuid;
 
+/// Container for `Task`: id, state, jon function, etc.
 pub struct Task {
     pub(crate) id: TaskId,
     pub(crate) job: AsyncJobBoxed,
@@ -22,17 +23,18 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn new<T>(schedule: TaskSchedule, job: T) -> Result<Self>
+    /// Creates new Task
+    pub fn new<T>(schedule: TaskSchedule, job: T) -> Self
     where
         T: 'static,
         T: FnMut(JobId) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
     {
-        Ok(Self {
-            id: TaskId::default(),
+        Self {
+            id: TaskId::new(),
             job: Arc::new(RwLock::new(Box::new(job))),
             schedule,
             state: TaskState::default(),
-        })
+        }
     }
 
     pub fn id(&self) -> TaskId {
@@ -63,9 +65,14 @@ pub struct TaskId {
     pub(crate) id: Uuid,
 }
 
+impl TaskId {
+    pub fn new() -> Self {
+        Self { id: Uuid::new_v4() }
+    }
+}
 impl Default for TaskId {
     fn default() -> Self {
-        Self { id: Uuid::new_v4() }
+        Self::new()
     }
 }
 
@@ -300,6 +307,7 @@ impl From<EventId> for TaskId {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::Result;
 
     #[test]
     fn cron_with_seconds() {

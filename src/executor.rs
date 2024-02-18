@@ -191,8 +191,7 @@ mod test {
             Box::pin(async move {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             })
-        })
-        .unwrap();
+        });
         let job_0 = task_0.job.clone();
         let job_id_0 = JobId::new();
         let job_0 = Job::new(job_id_0.clone(), job_0);
@@ -201,8 +200,7 @@ mod test {
             Box::pin(async move {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             })
-        })
-        .unwrap();
+        });
         let job_1 = task_1.job.clone();
         let job_id_1 = JobId::new();
         let job_1 = Job::new(job_id_1.clone(), job_1);

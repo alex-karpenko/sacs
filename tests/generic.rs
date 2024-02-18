@@ -35,7 +35,7 @@ async fn basic_test_suite(
                 tokio::time::sleep(task_duration).await;
                 log.write().await.push(format!("{},finish,{id}", s));
             })
-        })?;
+        });
         scheduler.add(task).await?;
         tokio::time::sleep(Duration::from_millis(1)).await;
     }

@@ -11,7 +11,7 @@
 
 ## Quick start
 
-Just create `Scheduler` and add `Task`s to it.
+Just create `Scheduler` and add `Task` to it.
 
 ```rust
 use sacs::{
@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
 }
 ```
 
-Refer to [`Scheduler`](scheduler/struct.Scheduler.html) and [`Task`](task/struct.Task.html) documentation for more examples and details of possible variants of configuration.
+Refer to crate documentation for more examples and details of possible variants of usage.
 
 ## License
 

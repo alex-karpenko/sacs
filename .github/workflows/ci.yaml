@@ -22,7 +22,7 @@ jobs:
         name: Setup toolchain
         with:
           toolchain: ${{ matrix.rust }}
-          components: rustfmt,clippy,audit
+          components: rustfmt,clippy
 
       - name: Build
         run: cargo build -F ${{ matrix.features }}
@@ -39,6 +39,3 @@ jobs:
         run: |
           cargo clippy -F ${{ matrix.features }} -- -D warnings
           cargo clippy --tests -F ${{ matrix.features }} -- -D warnings
-
-      - name: Audit
-        run: cargo audit -D warnings

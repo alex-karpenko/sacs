@@ -1,4 +1,4 @@
-# *SACS* - Simple Asynchronous Cron Scheduler
+# **SACS** - Simple Asynchronous Cron Scheduler
 
 `SACS` is easy to use, lightweight scheduler and executor of repeatable async tasks for Tokio runtime.
 
@@ -26,12 +26,12 @@ use tracing::info;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Create default scheduler
+    // Create scheduler with default config
     let scheduler = Scheduler::default();
 
     // Create task with cron schedule: repeat it every 3 seconds
-    let schedule = TaskSchedule::RepeatByCron("*/3 * * * * *".try_into()?);
-    let task = Task::new(schedule, |id| {
+    let cron = TaskSchedule::RepeatByCron("*/3 * * * * *".try_into()?);
+    let task = Task::new(cron, |id| {
         Box::pin(async move {
             info!("Job {id} started.");
             // Actual async workload here
@@ -52,3 +52,9 @@ async fn main() -> Result<()> {
     scheduler.shutdown(true).await
 }
 ```
+
+Refer to [`Scheduler`](scheduler/struct.Scheduler.html) and [`Task`](task/struct.Task.html) documentation for more examples and details of possible variants of configuration.
+
+## License
+
+This project is licensed under the [MIT license](LICENSE).

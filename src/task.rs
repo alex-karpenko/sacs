@@ -33,7 +33,6 @@ impl Task {
     /// ```rust
     /// use sacs::task::{Task, TaskSchedule};
     /// use std::time::Duration;
-    /// use tracing::info;
     ///
     /// let schedule = TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap());
     /// let task = Task::new(schedule, |id| {
@@ -41,7 +40,7 @@ impl Task {
     ///         // Actual async workload here
     ///         tokio::time::sleep(Duration::from_secs(1)).await;
     ///         // ...
-    ///         info!("Job {id} finished.");
+    ///         println!("Job {id} finished.");
     ///         })
     ///     });
     /// ```

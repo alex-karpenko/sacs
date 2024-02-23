@@ -1,7 +1,4 @@
-//! # *SACS* - Simple Asynchronous Cron Scheduler
-//!
-//! `SACS` is a easy to use, small and lightweight task scheduler and executor for Tokio runtime.
-
+#![doc = include_str!("../README.md")]
 mod event;
 mod executor;
 mod job;

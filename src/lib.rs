@@ -3,7 +3,7 @@ mod event;
 mod executor;
 mod job;
 mod queue;
-/// Scheduler it heart of the `SACS`. This is an entry point to schedule and control on `Task`s and whole jobs runtime.
+/// `Scheduler` is a heart of the `SACS`. This is an entry point to schedule and control on `Task`s and whole jobs runtime.
 pub mod scheduler;
 /// `Task` object represents single job with schedule. Use it to create workload of different types and post it to `Scheduler`.
 pub mod task;

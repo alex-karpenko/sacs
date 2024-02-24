@@ -224,49 +224,31 @@ mod test {
             // Start both jobs
             // 1st - Starting, 2nd - Pending (because single job worker)
             async {
-                assert_eq!(
-                    executor.state(&job_id_0).await.unwrap(),
-                    JobState::Starting
-                );
+                assert_eq!(executor.state(&job_id_0).await.unwrap(), JobState::Starting);
             },
             async {
-                assert_eq!(
-                    executor.state(&job_id_1).await.unwrap(),
-                    JobState::Pending
-                );
+                assert_eq!(executor.state(&job_id_1).await.unwrap(), JobState::Pending);
             },
             // wait 200ms
             // 1st - Running, 2nd - Pending
             async {
                 tokio::time::sleep(Duration::from_millis(200)).await;
-                assert_eq!(
-                    executor.state(&job_id_0).await.unwrap(),
-                    JobState::Running
-                );
+                assert_eq!(executor.state(&job_id_0).await.unwrap(), JobState::Running);
             },
             async {
                 tokio::time::sleep(Duration::from_millis(200)).await;
-                assert_eq!(
-                    executor.state(&job_id_1).await.unwrap(),
-                    JobState::Pending
-                );
+                assert_eq!(executor.state(&job_id_1).await.unwrap(), JobState::Pending);
             },
             // wait 400ms and cancel 1st
             // 1st - Running, 2nd - Pending
             async {
                 tokio::time::sleep(Duration::from_millis(400)).await;
                 executor.cancel(&job_id_0).await.unwrap();
-                assert_eq!(
-                    executor.state(&job_id_0).await.unwrap(),
-                    JobState::Running
-                );
+                assert_eq!(executor.state(&job_id_0).await.unwrap(), JobState::Running);
             },
             async {
                 tokio::time::sleep(Duration::from_millis(400)).await;
-                assert_eq!(
-                    executor.state(&job_id_1).await.unwrap(),
-                    JobState::Pending
-                );
+                assert_eq!(executor.state(&job_id_1).await.unwrap(), JobState::Pending);
             },
             // wait 600ms
             // 1st - Cancelled, 2nd - Running
@@ -279,10 +261,7 @@ mod test {
             },
             async {
                 tokio::time::sleep(Duration::from_millis(600)).await;
-                assert_eq!(
-                    executor.state(&job_id_1).await.unwrap(),
-                    JobState::Running
-                );
+                assert_eq!(executor.state(&job_id_1).await.unwrap(), JobState::Running);
             },
             // wait 800ms
             // 1st - no state, 2nd - Running
@@ -295,10 +274,7 @@ mod test {
             },
             async {
                 tokio::time::sleep(Duration::from_millis(800)).await;
-                assert_eq!(
-                    executor.state(&job_id_1).await.unwrap(),
-                    JobState::Running
-                );
+                assert_eq!(executor.state(&job_id_1).await.unwrap(), JobState::Running);
             },
             // wait 1500ms
             // 2nd - Completed

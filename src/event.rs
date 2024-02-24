@@ -1,5 +1,6 @@
 use crate::task::TaskId;
 use std::time::SystemTime;
+use chrono::{DateTime, Local};
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
@@ -37,10 +38,20 @@ impl From<&EventId> for Uuid {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
+#[derive(PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub(crate) struct Event {
     pub id: EventId,
     time: SystemTime,
+}
+
+impl std::fmt::Debug for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let time_str = format!("{}", DateTime::<Local>::from(self.time));
+        f.debug_struct("Event")
+            .field("id", &self.id)
+            .field("time", &time_str)
+            .finish()
+    }
 }
 
 impl Event {

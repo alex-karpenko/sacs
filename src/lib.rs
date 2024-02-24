@@ -2,20 +2,21 @@
 //!
 //! `SACS` is easy to use, lightweight scheduler and executor of repeatable async tasks for Tokio runtime.
 //!
-//! # Features
+//! ## Features
 //!
 //! - Runs tasks with different types of schedule: once, with delay, by interval, with cron schedule.
-//! - Uses current Tokio runtime or creates new one with specified type, number of threads and restricted parallelism.
+//! - Uses current Tokio runtime or creates new one with specified type, number of threads and limited parallelism.
 //! - Allows task cancellation and getting current state of task.
 //! - Lightweight, small, easy to use.
 //!
-//! # Quick start
+//! ## Quick start
 //!
-//! Just create `Scheduler` and add `Task` to it.
+//! Just create `Scheduler` and add `Task` to it. Refer to [`scheduler`] and [`task`] modules documentation
+//! for more examples and details of possible variants of usage.
 //!
 //! ```rust
 //! use sacs::{
-//!     scheduler::{Scheduler, TaskScheduler},
+//!     scheduler::{Scheduler, ShutdownOpts, TaskScheduler},
 //!     task::{Task, TaskSchedule},
 //!     Result,
 //! };
@@ -41,20 +42,17 @@
 //!         })
 //!     });
 //!
-//!     // Post task to scheduler and forget it :)
-//!     scheduler.add(task).await;
+//!     // Post task to the scheduler and forget it :)
+//!     let _task_id = scheduler.add(task).await?;
 //!
-//!     // ... and do any other async work
+//!     // ... and do any other async work in parallel
 //!     tokio::time::sleep(Duration::from_secs(10)).await;
 //!
-//!     // It's not mandatory but good to shutdown scheduler.
+//!     // It's not mandatory but good to shutdown scheduler
 //!     // Wait for completion of all running jobs
-//!     scheduler.shutdown(true).await
+//!     scheduler.shutdown(ShutdownOpts::WaitForFinish).await
 //! }
 //! ```
-//!
-//! Refer to [`Scheduler`](scheduler/struct.Scheduler.html) and [`Task`](task/struct.Task.html) documentation for more examples and details of possible variants of usage.
-//!
 
 mod event;
 mod executor;
@@ -153,22 +151,4 @@ impl<T> Default for ControlChannel<T> {
     fn default() -> Self {
         Self::new(DEFAULT_CONTROL_CHANNEL_SIZE)
     }
-}
-
-/// Type of `Tokio` runtime to use for jobs worker.
-#[derive(Debug, Default)]
-pub enum WorkerType {
-    /// Use current runtime instead of creating new one.
-    ///
-    /// This is the simplest and lightest worker because it uses runtime of the calling context.
-    /// This is default type.
-    #[default]
-    CurrentRuntime,
-    /// Creates new thread and runs new `Tokio` runtime of `CurrentThread` type. Single thread worker.
-    CurrentThread,
-    /// Creates new thread and runs new `Tokio` runtime of `MultiThread` type.
-    ///
-    /// Multi thread worker. Number of threads to use can be specified via parameter.
-    /// Uses `Tokio` default (number of CPU cores) if `None`.
-    MultiThread(Option<usize>),
 }

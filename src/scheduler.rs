@@ -1,27 +1,29 @@
 use crate::{
     event::Event,
-    executor::{Executor, JobExecutor, DEFAULT_MAX_PARALLEL_JOBS},
-    job::{Job, JobId, JobStatus},
+    executor::{Executor, JobExecutor},
+    job::{Job, JobId, JobState},
     queue::{EventTimeQueue, Queue},
     task::{Task, TaskId, TaskStatus},
-    ControlChannel, Error, Result, WorkerType,
+    ControlChannel, Error, Result,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     select,
     sync::{mpsc::Sender, RwLock},
 };
 use tracing::{debug, warn};
 
+/// Default maximin number of jobs to run on the single worker
+pub(crate) const DEFAULT_MAX_PARALLEL_JOBS: usize = 16;
 const SCHEDULER_CONTROL_CHANNEL_SIZE: usize = 1024;
 
 #[cfg(feature = "async-trait")]
 #[allow(async_fn_in_trait)]
 pub trait TaskScheduler {
     async fn add(&self, task: Task) -> Result<TaskId>;
-    async fn drop(&self, id: TaskId, cancel: bool) -> Result<()>;
+    async fn drop(&self, id: TaskId, opts: CancelOpts) -> Result<()>;
     async fn status(&self, id: TaskId) -> Result<TaskStatus>;
-    async fn shutdown(self, wait: bool) -> Result<()>;
+    async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
 }
 
 #[cfg(not(feature = "async-trait"))]
@@ -30,10 +32,10 @@ pub trait TaskScheduler {
     fn drop(
         &self,
         id: TaskId,
-        cancel: bool,
+        opts: CancelOpts,
     ) -> impl std::future::Future<Output = Result<()>> + Send;
     fn status(&self, id: TaskId) -> impl std::future::Future<Output = Result<TaskStatus>> + Send;
-    fn shutdown(self, wait: bool) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn shutdown(self, opts: ShutdownOpts) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 pub struct Scheduler {
@@ -44,14 +46,14 @@ pub struct Scheduler {
 
 #[derive(Debug)]
 enum ChangeStateEvent {
-    Shutdown(bool),
+    Shutdown(ShutdownOpts),
     EnqueueTask(Task),
-    DropTask(TaskId, bool),
+    DropTask(TaskId, CancelOpts),
 }
 
 impl Scheduler {
-    pub fn new(worker_type: WorkerType, max_parallel_jobs: usize) -> Self {
-        debug!("new: type={:?}, max jobs={max_parallel_jobs}", worker_type);
+    pub fn new(worker_type: WorkerType, parallelism: WorkerParallelism) -> Self {
+        debug!("new: type={:?}, max jobs={parallelism:?}", worker_type);
         let channel = ControlChannel::<ChangeStateEvent>::new(SCHEDULER_CONTROL_CHANNEL_SIZE);
         let tasks = Arc::new(RwLock::new(HashMap::new()));
 
@@ -60,7 +62,7 @@ impl Scheduler {
             channel: channel.sender(),
             handler: tokio::task::spawn(Scheduler::work(
                 worker_type,
-                max_parallel_jobs,
+                parallelism,
                 tasks.clone(),
                 channel,
             )),
@@ -69,114 +71,117 @@ impl Scheduler {
 
     async fn work(
         worker_type: WorkerType,
-        max_parallel_jobs: usize,
+        parallelism: WorkerParallelism,
         tasks: Arc<RwLock<HashMap<TaskId, Task>>>,
         channel: ControlChannel<ChangeStateEvent>,
     ) -> Result<()> {
         let queue = Queue::default();
-        let executor = Executor::new(worker_type, max_parallel_jobs);
+        let executor = Executor::new(worker_type, parallelism);
         let mut jobs: HashMap<JobId, TaskId> = HashMap::new();
 
         debug!("work: start events loop");
         loop {
             select! {
-            biased;
-            event = channel.receive() => {
-                if let Some(event) = event {
-                    debug!("work: control event={:?}", event);
-                    match event {
-                        ChangeStateEvent::Shutdown(wait) => {
-                            queue.shutdown().await;
-                            executor.shutdown(wait).await?;
-                            return Ok(())
-                        },
-                        ChangeStateEvent::EnqueueTask(mut task) => {
-                            let event_id = task.id.clone().into();
-                            let task_id = task.id.clone();
-                            let at = task.schedule.initial_run_time();
-                            queue.insert(Event::new(event_id, at)).await?;
-                            task.state.enqueued();
-                            let mut tasks = tasks.write().await;
-                            tasks.insert(task_id, task);
-                        },
-                        ChangeStateEvent::DropTask(id, cancel) => {
-                            let tasks = tasks.read().await;
-                            let task = tasks.get(&id);
-                            if let Some(task) = task {
-                                let event_id = id.into();
-                                queue.pop(&event_id).await?;
-                                if cancel {
-                                    for job in task.state.jobs() {
-                                        executor.cancel(&job).await?;
+                biased;
+                event = channel.receive() => {
+                    if let Some(event) = event {
+                        debug!("work: control event={:?}", event);
+                        match event {
+                            ChangeStateEvent::Shutdown(opts) => {
+                                queue.shutdown().await;
+                                executor.shutdown(opts).await?;
+                                tasks.write().await.clear();
+                                return Ok(())
+                            },
+                            ChangeStateEvent::EnqueueTask(mut task) => {
+                                let event_id = task.id.clone().into();
+                                let task_id = task.id.clone();
+                                let at = task.schedule.initial_run_time();
+                                queue.insert(Event::new(event_id, at)).await?;
+                                task.state.enqueued();
+                                let mut tasks = tasks.write().await;
+                                tasks.insert(task_id, task);
+                            },
+                            ChangeStateEvent::DropTask(id, opts) => {
+                                let tasks = tasks.read().await;
+                                let task = tasks.get(&id);
+                                if let Some(task) = task {
+                                    let event_id = id.into();
+                                    queue.pop(&event_id).await?;
+                                    match opts {
+                                        CancelOpts::Ignore => {},
+                                        CancelOpts::Kill => {
+                                            for job in task.state.jobs() {
+                                                executor.cancel(&job).await?;
+                                            }
+                                        },
                                     }
                                 }
                             }
                         }
-                    }
-                } else {
-                    warn!("work: empty events channel");
-                }
-            },
-            event = queue.next() => {
-                if let Ok(event) = event {
-                    debug!("work: queue event={:?}", event);
-                    let mut tasks = tasks.write().await;
-                    let task = tasks.get_mut(&event.id.into());
-
-                    if let Some(task) = task {
-                        let job_id = JobId::new();
-                        let job = task.job.clone();
-                        let job = Job::new(job_id, job);
-                        let job_id = executor.enqueue(job).await?;
-                        jobs.insert(job_id.clone(), task.id.clone());
-                        task.state.scheduled(job_id);
-                        let at = task.schedule.after_start_run_time();
-                        if let Some(at) = at {
-                            let event_id = task.id.clone().into();
-                            queue.insert(Event::new(event_id, at)).await?;
-                            task.state.enqueued();
-                        }
-                    }
                     } else {
-                        warn!("work: error from queue received={:?}, exiting", event);
-                        return Err(event.err().unwrap())
+                        warn!("work: empty events channel");
                     }
                 },
-            job_id = executor.work() => {
-                if let Ok(job_id) = job_id {
-                    debug!("work: executor event={:?}", job_id);
-                    let mut tasks = tasks.write().await;
-                    let job_status = executor.status(&job_id).await?;
-                    let task_id = jobs.get(&job_id);
-                    if let Some(task_id) = task_id {
-                        let task = tasks.get_mut(task_id);
+                event = queue.next() => {
+                    if let Ok(event) = event {
+                        debug!("work: queue event={:?}", event);
+                        let mut tasks = tasks.write().await;
+                        let task = tasks.get_mut(&event.id.into());
+
                         if let Some(task) = task {
-                            debug!("work: job status changed={:?}", job_status);
-                            let mut at = None;
-                            match job_status {
-                                JobStatus::Running => { task.state.started(job_id); },
-                                JobStatus::Completed => {
-                                    task.state.completed(&job_id);
-                                    at = task.schedule.after_finish_run_time();
-                                },
-                                JobStatus::Cancelled => {
-                                    task.state.cancelled(&job_id);
-                                    at = task.schedule.after_finish_run_time();
-                                },
-                                _ => {},
-                            };
+                            let job_id = JobId::new();
+                            let job = task.job.clone();
+                            let job = Job::new(job_id, job);
+                            let job_id = executor.enqueue(job).await?;
+                            jobs.insert(job_id.clone(), task.id.clone());
+                            task.state.scheduled(job_id);
+                            let at = task.schedule.after_start_run_time();
                             if let Some(at) = at {
                                 let event_id = task.id.clone().into();
                                 queue.insert(Event::new(event_id, at)).await?;
                                 task.state.enqueued();
                             }
                         }
+                        } else {
+                            warn!("work: error from queue received={:?}, exiting", event);
+                            return Err(event.err().unwrap())
+                        }
+                    },
+                job_id = executor.work() => {
+                    if let Ok(job_id) = job_id {
+                        debug!("work: executor event={:?}", job_id);
+                        let mut tasks = tasks.write().await;
+                        let job_state = executor.state(&job_id).await?;
+                        let task_id = jobs.get(&job_id);
+                        if let Some(task_id) = task_id {
+                            let task = tasks.get_mut(task_id);
+                            if let Some(task) = task {
+                                debug!("work: job status changed={:?}", job_state);
+                                let mut at = None;
+                                match job_state {
+                                    JobState::Running => { task.state.started(job_id); },
+                                    JobState::Completed => {
+                                        task.state.completed(&job_id);
+                                        at = task.schedule.after_finish_run_time();
+                                    },
+                                    JobState::Cancelled => {
+                                        task.state.cancelled(&job_id);
+                                        at = task.schedule.after_finish_run_time();
+                                    },
+                                    _ => {},
+                                };
+                                if let Some(at) = at {
+                                    let event_id = task.id.clone().into();
+                                    queue.insert(Event::new(event_id, at)).await?;
+                                    task.state.enqueued();
+                                }
+                            }
+                        }
+                    } else {
+                        warn!("work: error from executor received={:?}", job_id);
                     }
-                } else {
-                    warn!("work: error from executor received={:?}", job_id);
                 }
-            }
-
             }
         }
     }
@@ -191,7 +196,7 @@ impl Scheduler {
 
 impl Default for Scheduler {
     fn default() -> Self {
-        Self::new(WorkerType::CurrentRuntime, DEFAULT_MAX_PARALLEL_JOBS)
+        Self::new(WorkerType::default(), WorkerParallelism::default())
     }
 }
 
@@ -202,9 +207,8 @@ impl TaskScheduler for Scheduler {
         Ok(id)
     }
 
-    async fn drop(&self, id: TaskId, cancel: bool) -> Result<()> {
-        self.send_event(ChangeStateEvent::DropTask(id, cancel))
-            .await
+    async fn drop(&self, id: TaskId, opts: CancelOpts) -> Result<()> {
+        self.send_event(ChangeStateEvent::DropTask(id, opts)).await
     }
 
     async fn status(&self, id: TaskId) -> Result<TaskStatus> {
@@ -223,18 +227,83 @@ impl TaskScheduler for Scheduler {
         Err(Error::IncorrectTaskId(id))
     }
 
-    async fn shutdown(self, wait: bool) -> Result<()> {
-        debug!("shutdown: requested");
-        self.send_event(ChangeStateEvent::Shutdown(wait)).await?;
-        if wait {
-            debug!("shutdown: waiting for scheduler handler completion");
-            return futures::join!(self.handler)
-                .0
-                .map_err(|_e| Error::IncompleteShutdown)?;
-        }
+    async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
+        debug!("shutdown: requested with opts={opts:?}");
+        self.send_event(ChangeStateEvent::Shutdown(opts.clone()))
+            .await?;
 
-        Ok(())
+        match opts {
+            ShutdownOpts::IgnoreRunning => Ok(()),
+            ShutdownOpts::CancelTasks(_) | ShutdownOpts::WaitForFinish => {
+                futures::join!(self.handler)
+                    .0
+                    .map_err(|_e| Error::IncompleteShutdown)?
+            }
+            ShutdownOpts::WaitFor(timeout) => {
+                select! {
+                    res = self.handler => {
+                        res.map_err(|_e| Error::IncompleteShutdown)?
+                    },
+                    _ = tokio::time::sleep(timeout) => {
+                        Err(Error::IncompleteShutdown)
+                    },
+                }
+            }
+        }
     }
+}
+
+/// Type of `Tokio` runtime to use for jobs worker.
+#[derive(Debug, Default)]
+pub enum WorkerType {
+    /// Use current runtime instead of creating new one.
+    ///
+    /// This is the simplest and lightest worker because it uses runtime of the calling context.
+    /// This is default type.
+    #[default]
+    CurrentRuntime,
+    /// Creates new thread and runs new `Tokio` runtime of `CurrentThread` type. Single thread worker.
+    CurrentThread,
+    /// Creates new thread and runs new `Tokio` runtime of `MultiThread` type.
+    ///
+    /// This is multi thread worker. Number of threads to use can be specified via parameter.
+    /// Default is `Tokio` default - number of CPU cores.
+    MultiThread(RuntimeThreads),
+}
+
+#[derive(Debug, Default)]
+pub enum RuntimeThreads {
+    #[default]
+    CpuCores,
+    Limited(usize),
+}
+
+#[derive(Debug)]
+pub enum WorkerParallelism {
+    Unlimited,
+    Limited(usize),
+}
+
+impl Default for WorkerParallelism {
+    fn default() -> Self {
+        Self::Limited(DEFAULT_MAX_PARALLEL_JOBS)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub enum CancelOpts {
+    #[default]
+    Ignore,
+    Kill,
+}
+
+#[derive(Debug, Default, Clone)]
+pub enum ShutdownOpts {
+    IgnoreRunning,
+    CancelTasks(CancelOpts),
+    #[default]
+    WaitForFinish,
+    WaitFor(Duration),
 }
 
 #[cfg(test)]
@@ -278,7 +347,7 @@ mod test {
         }
 
         tokio::time::sleep(suite_duration).await;
-        scheduler.shutdown(true).await?;
+        scheduler.shutdown(ShutdownOpts::WaitForFinish).await?;
 
         let logs: Vec<String> = logs.read().await.iter().map(String::from).collect();
         let jobs: Vec<String> = jobs.read().await.iter().map(|s| format!("{s}")).collect();
@@ -295,7 +364,7 @@ mod test {
             Duration::from_secs(3),
             Duration::from_secs(1),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, 1);
+        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(1));
 
         let (logs, jobs) =
             basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(5))
@@ -323,13 +392,13 @@ mod test {
             TaskSchedule::Once,
         ]);
         let durations = [
-            Duration::from_secs(3),
-            Duration::from_secs(3),
-            Duration::from_secs(3),
-            Duration::from_secs(3),
-            Duration::from_secs(1),
+            Duration::from_millis(2950),
+            Duration::from_millis(3000),
+            Duration::from_millis(2950),
+            Duration::from_millis(3000),
+            Duration::from_millis(1),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, 2);
+        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(2));
 
         let (logs, jobs) =
             basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(5))
@@ -353,13 +422,54 @@ mod test {
     }
 
     #[tokio::test]
+    async fn once_unlimited_workers() {
+        let schedules: Vec<TaskSchedule> = Vec::from([
+            TaskSchedule::Once,
+            TaskSchedule::Once,
+            TaskSchedule::Once,
+            TaskSchedule::Once,
+            TaskSchedule::Once,
+        ]);
+        let durations = [
+            Duration::from_millis(1000),
+            Duration::from_millis(1200),
+            Duration::from_millis(1300),
+            Duration::from_millis(1400),
+            Duration::from_millis(2000),
+        ];
+        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Unlimited);
+
+        let (logs, jobs) =
+            basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(1))
+                .await
+                .unwrap();
+
+        assert_eq!(logs.len(), 10);
+        assert_eq!(jobs.len(), 5);
+
+        let expected: Vec<String> = Vec::from([
+            format!("0,start,{}", jobs[0]),
+            format!("1,start,{}", jobs[1]),
+            format!("2,start,{}", jobs[2]),
+            format!("3,start,{}", jobs[3]),
+            format!("4,start,{}", jobs[4]),
+            format!("0,finish,{}", jobs[0]),
+            format!("1,finish,{}", jobs[1]),
+            format!("2,finish,{}", jobs[2]),
+            format!("3,finish,{}", jobs[3]),
+            format!("4,finish,{}", jobs[4]),
+        ]);
+        assert_eq!(logs, expected);
+    }
+
+    #[tokio::test]
     async fn cron() {
         let schedules: Vec<TaskSchedule> = Vec::from([
             TaskSchedule::RepeatByCron("*/2 * * * * *".try_into().unwrap()),
             TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap()),
         ]);
         let durations = [Duration::from_millis(1200), Duration::from_millis(3500)];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, 2);
+        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(2));
 
         // wait for next 10 seconds interval
         let now = SystemTime::now()
@@ -426,7 +536,7 @@ mod test {
             Duration::from_secs(1),
             Duration::from_secs(1),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, 4);
+        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(4));
 
         let (logs, jobs) =
             basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(4))
@@ -463,7 +573,7 @@ mod test {
             Duration::from_secs(5),
             Duration::from_secs(1),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, 4);
+        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(4));
 
         let (logs, jobs) = basic_test_suite(
             scheduler,

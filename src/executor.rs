@@ -1,27 +1,26 @@
 use crate::{
-    job::{Job, JobId, JobStatus},
+    job::{Job, JobId, JobState},
+    scheduler::{ShutdownOpts, WorkerParallelism, WorkerType},
     worker::{AsyncWorker, Worker},
-    ControlChannel, Error, Result, WorkerType,
+    ControlChannel, Error, Result,
 };
 use std::collections::{HashMap, VecDeque};
 use tokio::{select, sync::RwLock};
 use tracing::{debug, warn};
 
-/// Default maximin number of jobs to run on the single worker
-pub(crate) const DEFAULT_MAX_PARALLEL_JOBS: usize = 16;
 /// Default size of control channels
 const EXECUTOR_CONTROL_CHANNEL_SIZE: usize = 1024;
 
 pub(crate) trait JobExecutor {
     async fn enqueue(&self, job: Job) -> Result<JobId>;
     async fn cancel(&self, id: &JobId) -> Result<()>;
-    async fn status(&self, id: &JobId) -> Result<JobStatus>;
+    async fn state(&self, id: &JobId) -> Result<JobState>;
     async fn work(&self) -> Result<JobId>;
-    async fn shutdown(self, wait: bool) -> Result<()>;
+    async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
 }
 
 pub(crate) struct Executor {
-    max_parallel_jobs: usize,
+    parallelism: WorkerParallelism,
     control_channel: ControlChannel<ChangeExecutorStateEvent>,
     worker: Worker,
     jobs: RwLock<ExecutorJobsState>,
@@ -30,24 +29,24 @@ pub(crate) struct Executor {
 #[derive(Default)]
 struct ExecutorJobsState {
     pending: VecDeque<Job>,
-    status: HashMap<JobId, JobStatus>,
+    state: HashMap<JobId, JobState>,
 }
 
 impl ExecutorJobsState {
     pub fn clear(&mut self) {
         self.pending.clear();
-        self.status.clear();
+        self.state.clear();
     }
 }
 
 impl Executor {
-    pub fn new(worker_type: WorkerType, max_parallel_jobs: usize) -> Self {
-        debug!("new: type={:?}, max jobs={max_parallel_jobs}", worker_type);
+    pub fn new(worker_type: WorkerType, parallelism: WorkerParallelism) -> Self {
+        debug!("new: type={:?}, max jobs={parallelism:?}", worker_type);
         let executor_channel = ControlChannel::new(EXECUTOR_CONTROL_CHANNEL_SIZE);
         let to_executor = executor_channel.sender();
 
         Self {
-            max_parallel_jobs,
+            parallelism,
             control_channel: executor_channel,
             worker: Worker::new(worker_type, to_executor),
             jobs: RwLock::new(ExecutorJobsState::default()),
@@ -56,25 +55,38 @@ impl Executor {
 
     async fn requeue_jobs(&self) -> Result<()> {
         let mut jobs = self.jobs.write().await;
-        let running = jobs
-            .status
-            .iter()
-            .filter(|(_id, status)| {
-                **status == JobStatus::Running || **status == JobStatus::Starting
-            })
-            .count();
+        // Nothing to execute
+        if jobs.pending.is_empty() {
+            return Ok(());
+        }
 
-        if running < self.max_parallel_jobs {
-            let free_slots = self.max_parallel_jobs - running;
-            debug!("requeue_jobs: {} new jobs can be started", free_slots);
-            for _ in 0..free_slots {
-                if let Some(job) = jobs.pending.pop_front() {
-                    let id = job.id();
-                    jobs.status.insert(id, JobStatus::Starting);
-                    self.worker.start(job).await?;
+        let jobs_to_run = match self.parallelism {
+            WorkerParallelism::Unlimited => jobs.pending.len(),
+            WorkerParallelism::Limited(limit) => {
+                let running = jobs
+                    .state
+                    .iter()
+                    .filter(|(_id, state)| {
+                        **state == JobState::Running || **state == JobState::Starting
+                    })
+                    .count();
+
+                if running < limit {
+                    limit - running
                 } else {
-                    break;
+                    0
                 }
+            }
+        };
+
+        debug!("requeue_jobs: {} new jobs can be started", jobs_to_run);
+        for _ in 0..jobs_to_run {
+            if let Some(job) = jobs.pending.pop_front() {
+                let id = job.id();
+                jobs.state.insert(id, JobState::Starting);
+                self.worker.start(job).await?;
+            } else {
+                break;
             }
         }
 
@@ -84,7 +96,7 @@ impl Executor {
 
 impl Default for Executor {
     fn default() -> Self {
-        Self::new(WorkerType::CurrentThread, DEFAULT_MAX_PARALLEL_JOBS)
+        Self::new(WorkerType::CurrentThread, WorkerParallelism::default())
     }
 }
 
@@ -96,19 +108,19 @@ impl JobExecutor for Executor {
                 if let Some(event) = event {
                     match event {
                         ChangeExecutorStateEvent::JobStarted(id) => {
-                            self.jobs.write().await.status.insert(id.clone(), JobStatus::Running);
+                            self.jobs.write().await.state.insert(id.clone(), JobState::Running);
                             Ok(id)
                         },
                         ChangeExecutorStateEvent::JobCancelled(id) => {
                             {
-                                self.jobs.write().await.status.insert(id.clone(), JobStatus::Cancelled);
+                                self.jobs.write().await.state.insert(id.clone(), JobState::Cancelled);
                             }
                             self.requeue_jobs().await?;
                             Ok(id)
                         },
                         ChangeExecutorStateEvent::JobCompleted(id) => {
                             {
-                                self.jobs.write().await.status.insert(id.clone(), JobStatus::Completed);
+                                self.jobs.write().await.state.insert(id.clone(), JobState::Completed);
                             }
                             self.requeue_jobs().await?;
                             Ok(id)
@@ -130,7 +142,7 @@ impl JobExecutor for Executor {
             let id = job.id();
 
             jobs.pending.push_back(job);
-            jobs.status.insert(id, JobStatus::Pending);
+            jobs.state.insert(id, JobState::Pending);
         }
         self.requeue_jobs().await?;
 
@@ -143,14 +155,14 @@ impl JobExecutor for Executor {
         Ok(())
     }
 
-    async fn status(&self, id: &JobId) -> Result<JobStatus> {
-        debug!("status: id={:?}", id);
+    async fn state(&self, id: &JobId) -> Result<JobState> {
+        debug!("state: id={:?}", id);
         let mut jobs = self.jobs.write().await;
-        if let Some(status) = jobs.status.get(id) {
-            let response = Ok(status.clone());
-            if status.finished() {
-                debug!("status: remove finished job status, id={:?}", id);
-                jobs.status.remove(id);
+        if let Some(state) = jobs.state.get(id) {
+            let response = Ok(state.clone());
+            if state.finished() {
+                debug!("state: remove finished job state, id={:?}", id);
+                jobs.state.remove(id);
             }
             response
         } else {
@@ -158,9 +170,9 @@ impl JobExecutor for Executor {
         }
     }
 
-    async fn shutdown(self, wait: bool) -> Result<()> {
+    async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
         debug!("shutdown: requested");
-        let result = self.worker.shutdown(wait).await;
+        let result = self.worker.shutdown(opts).await;
         self.jobs.write().await.clear();
 
         result
@@ -184,7 +196,7 @@ mod test {
 
     #[tokio::test]
     async fn current_runtime_single_worker() {
-        let executor = Executor::new(WorkerType::CurrentRuntime, 1);
+        let executor = Executor::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(1));
         let completed = Arc::new(RwLock::<bool>::new(false));
 
         let task_0 = Task::new(TaskSchedule::Once, |_id| {
@@ -213,14 +225,14 @@ mod test {
             // 1st - Starting, 2nd - Pending (because single job worker)
             async {
                 assert_eq!(
-                    executor.status(&job_id_0).await.unwrap(),
-                    JobStatus::Starting
+                    executor.state(&job_id_0).await.unwrap(),
+                    JobState::Starting
                 );
             },
             async {
                 assert_eq!(
-                    executor.status(&job_id_1).await.unwrap(),
-                    JobStatus::Pending
+                    executor.state(&job_id_1).await.unwrap(),
+                    JobState::Pending
                 );
             },
             // wait 200ms
@@ -228,15 +240,15 @@ mod test {
             async {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 assert_eq!(
-                    executor.status(&job_id_0).await.unwrap(),
-                    JobStatus::Running
+                    executor.state(&job_id_0).await.unwrap(),
+                    JobState::Running
                 );
             },
             async {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 assert_eq!(
-                    executor.status(&job_id_1).await.unwrap(),
-                    JobStatus::Pending
+                    executor.state(&job_id_1).await.unwrap(),
+                    JobState::Pending
                 );
             },
             // wait 400ms and cancel 1st
@@ -245,15 +257,15 @@ mod test {
                 tokio::time::sleep(Duration::from_millis(400)).await;
                 executor.cancel(&job_id_0).await.unwrap();
                 assert_eq!(
-                    executor.status(&job_id_0).await.unwrap(),
-                    JobStatus::Running
+                    executor.state(&job_id_0).await.unwrap(),
+                    JobState::Running
                 );
             },
             async {
                 tokio::time::sleep(Duration::from_millis(400)).await;
                 assert_eq!(
-                    executor.status(&job_id_1).await.unwrap(),
-                    JobStatus::Pending
+                    executor.state(&job_id_1).await.unwrap(),
+                    JobState::Pending
                 );
             },
             // wait 600ms
@@ -261,31 +273,31 @@ mod test {
             async {
                 tokio::time::sleep(Duration::from_millis(600)).await;
                 assert_eq!(
-                    executor.status(&job_id_0).await.unwrap(),
-                    JobStatus::Cancelled
+                    executor.state(&job_id_0).await.unwrap(),
+                    JobState::Cancelled
                 );
             },
             async {
                 tokio::time::sleep(Duration::from_millis(600)).await;
                 assert_eq!(
-                    executor.status(&job_id_1).await.unwrap(),
-                    JobStatus::Running
+                    executor.state(&job_id_1).await.unwrap(),
+                    JobState::Running
                 );
             },
             // wait 800ms
-            // 1st - no status, 2nd - Running
+            // 1st - no state, 2nd - Running
             async {
                 tokio::time::sleep(Duration::from_millis(800)).await;
                 assert!(matches!(
-                    executor.status(&job_id_0).await,
+                    executor.state(&job_id_0).await,
                     Err(Error::IncorrectJobId(id)) if id == job_id_0
                 ));
             },
             async {
                 tokio::time::sleep(Duration::from_millis(800)).await;
                 assert_eq!(
-                    executor.status(&job_id_1).await.unwrap(),
-                    JobStatus::Running
+                    executor.state(&job_id_1).await.unwrap(),
+                    JobState::Running
                 );
             },
             // wait 1500ms
@@ -293,16 +305,16 @@ mod test {
             async {
                 tokio::time::sleep(Duration::from_millis(1500)).await;
                 assert_eq!(
-                    executor.status(&job_id_1).await.unwrap(),
-                    JobStatus::Completed
+                    executor.state(&job_id_1).await.unwrap(),
+                    JobState::Completed
                 );
             },
             // wait 1600ms
-            // 2nd - no status
+            // 2nd - no state
             async {
                 tokio::time::sleep(Duration::from_millis(1600)).await;
                 assert!(matches!(
-                    executor.status(&job_id_1).await,
+                    executor.state(&job_id_1).await,
                     Err(Error::IncorrectJobId(id)) if id == job_id_1
                 ));
                 let mut completed = completed.write().await;

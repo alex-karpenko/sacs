@@ -75,7 +75,7 @@ impl std::fmt::Debug for Job {
 }
 
 #[derive(Debug, Default, PartialEq, Clone)]
-pub enum JobStatus {
+pub enum JobState {
     #[default]
     Pending,
     Starting,
@@ -84,9 +84,9 @@ pub enum JobStatus {
     Cancelled,
 }
 
-impl JobStatus {
+impl JobState {
     pub fn finished(&self) -> bool {
-        *self == JobStatus::Completed || *self == JobStatus::Cancelled
+        *self == JobState::Completed || *self == JobState::Cancelled
     }
 }
 
@@ -95,11 +95,11 @@ mod test {
     use super::*;
 
     #[test]
-    fn job_status_finished() {
-        assert!(!JobStatus::Pending.finished());
-        assert!(!JobStatus::Starting.finished());
-        assert!(!JobStatus::Running.finished());
-        assert!(JobStatus::Completed.finished());
-        assert!(JobStatus::Cancelled.finished());
+    fn job_state_finished() {
+        assert!(!JobState::Pending.finished());
+        assert!(!JobState::Starting.finished());
+        assert!(!JobState::Running.finished());
+        assert!(JobState::Completed.finished());
+        assert!(JobState::Cancelled.finished());
     }
 }

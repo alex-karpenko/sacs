@@ -1,7 +1,9 @@
 use sacs::{
-    scheduler::{Scheduler, TaskScheduler},
+    scheduler::{
+        RuntimeThreads, Scheduler, ShutdownOpts, TaskScheduler, WorkerParallelism, WorkerType,
+    },
     task::{Task, TaskSchedule},
-    Result, WorkerType,
+    Result,
 };
 use std::{sync::Arc, time::Duration};
 use tokio::sync::RwLock;
@@ -41,7 +43,7 @@ async fn basic_test_suite(
     }
 
     tokio::time::sleep(suite_duration).await;
-    scheduler.shutdown(true).await?;
+    scheduler.shutdown(ShutdownOpts::WaitForFinish).await?;
 
     let logs: Vec<String> = logs.read().await.iter().map(String::from).collect();
     let jobs: Vec<String> = jobs.read().await.iter().map(|s| format!("{s}")).collect();
@@ -64,7 +66,7 @@ async fn single_worker(worker_type: WorkerType) {
         Duration::from_secs(4),
         Duration::from_secs(5),
     ];
-    let scheduler = Scheduler::new(worker_type, 1);
+    let scheduler = Scheduler::new(worker_type, WorkerParallelism::Limited(1));
 
     let (logs, jobs) = basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(15))
         .await
@@ -88,7 +90,31 @@ async fn four_workers(worker_type: WorkerType) {
         Duration::from_secs(4),
         Duration::from_secs(5),
     ];
-    let scheduler = Scheduler::new(worker_type, 1);
+    let scheduler = Scheduler::new(worker_type, WorkerParallelism::Limited(4));
+
+    let (logs, jobs) = basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(15))
+        .await
+        .unwrap();
+
+    assert_eq!(logs.len(), jobs.len() * 2);
+}
+
+async fn unlimited_workers(worker_type: WorkerType) {
+    let schedules: Vec<TaskSchedule> = Vec::from([
+        TaskSchedule::Once,
+        TaskSchedule::OnceDelayed(Duration::from_secs(1)),
+        TaskSchedule::RepeatByInterval(Duration::from_secs(2)),
+        TaskSchedule::RepeatByIntervalDelayed(Duration::from_secs(3)),
+        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap()),
+    ]);
+    let durations = [
+        Duration::from_secs(1),
+        Duration::from_secs(2),
+        Duration::from_secs(3),
+        Duration::from_secs(4),
+        Duration::from_secs(5),
+    ];
+    let scheduler = Scheduler::new(worker_type, WorkerParallelism::Unlimited);
 
     let (logs, jobs) = basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(15))
         .await
@@ -109,12 +135,12 @@ async fn single_worker_current_thread() {
 
 #[tokio::test]
 async fn single_worker_two_threads() {
-    single_worker(WorkerType::MultiThread(Some(4))).await;
+    single_worker(WorkerType::MultiThread(RuntimeThreads::Limited(4))).await;
 }
 
 #[tokio::test]
 async fn single_worker_all_cores_threads() {
-    single_worker(WorkerType::MultiThread(None)).await;
+    single_worker(WorkerType::MultiThread(RuntimeThreads::CpuCores)).await;
 }
 
 #[tokio::test]
@@ -129,10 +155,30 @@ async fn four_workers_current_thread() {
 
 #[tokio::test]
 async fn four_workers_two_threads() {
-    four_workers(WorkerType::MultiThread(Some(4))).await;
+    four_workers(WorkerType::MultiThread(RuntimeThreads::Limited(4))).await;
 }
 
 #[tokio::test]
 async fn four_workers_all_cores_threads() {
-    four_workers(WorkerType::MultiThread(None)).await;
+    four_workers(WorkerType::MultiThread(RuntimeThreads::CpuCores)).await;
+}
+
+#[tokio::test]
+async fn unlimited_workers_current_runtime() {
+    unlimited_workers(WorkerType::CurrentRuntime).await;
+}
+
+#[tokio::test]
+async fn unlimited_workers_current_thread() {
+    unlimited_workers(WorkerType::CurrentThread).await;
+}
+
+#[tokio::test]
+async fn unlimited_workers_two_threads() {
+    unlimited_workers(WorkerType::MultiThread(RuntimeThreads::Limited(4))).await;
+}
+
+#[tokio::test]
+async fn unlimited_workers_all_cores_threads() {
+    unlimited_workers(WorkerType::MultiThread(RuntimeThreads::CpuCores)).await;
 }

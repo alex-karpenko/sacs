@@ -6,7 +6,11 @@ use crate::{
     task::{Task, TaskId, TaskStatus},
     ControlChannel, Error, Result,
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 use tokio::{
     select,
     sync::{mpsc::Sender, RwLock},
@@ -22,7 +26,7 @@ const SCHEDULER_CONTROL_CHANNEL_SIZE: usize = 1024;
 pub trait TaskScheduler {
     async fn add(&self, task: Task) -> Result<TaskId>;
     async fn drop(&self, id: TaskId, opts: CancelOpts) -> Result<()>;
-    async fn status(&self, id: TaskId) -> Result<TaskStatus>;
+    async fn status(&self, id: &TaskId) -> Result<TaskStatus>;
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
 }
 
@@ -34,7 +38,7 @@ pub trait TaskScheduler {
         id: TaskId,
         opts: CancelOpts,
     ) -> impl std::future::Future<Output = Result<()>> + Send;
-    fn status(&self, id: TaskId) -> impl std::future::Future<Output = Result<TaskStatus>> + Send;
+    fn status(&self, id: &TaskId) -> impl std::future::Future<Output = Result<TaskStatus>> + Send;
     fn shutdown(self, opts: ShutdownOpts) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
@@ -51,8 +55,154 @@ enum ChangeStateEvent {
     DropTask(TaskId, CancelOpts),
 }
 
+/// Type of `Tokio` runtime to use for jobs worker.
+#[derive(Debug, Default)]
+pub enum WorkerType {
+    /// Use current runtime instead of creating new one.
+    ///
+    /// This is the simplest and lightest worker because it uses runtime of the calling context.
+    /// This is default type.
+    #[default]
+    CurrentRuntime,
+    /// Creates new thread and runs new `Tokio` runtime of `CurrentThread` type. Single thread worker.
+    CurrentThread,
+    /// Creates new thread and runs new `Tokio` runtime of `MultiThread` type.
+    ///
+    /// This is multi thread worker. Number of threads to use can be specified via parameter.
+    /// Default is `Tokio` default - number of CPU cores.
+    MultiThread(RuntimeThreads),
+}
+
+#[derive(Debug, Default)]
+pub enum RuntimeThreads {
+    #[default]
+    CpuCores,
+    Limited(usize),
+}
+
+#[derive(Debug)]
+pub enum WorkerParallelism {
+    Unlimited,
+    Limited(usize),
+}
+
+impl Default for WorkerParallelism {
+    fn default() -> Self {
+        Self::Limited(DEFAULT_MAX_PARALLEL_JOBS)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub enum CancelOpts {
+    #[default]
+    Ignore,
+    Kill,
+}
+
+#[derive(Debug, Default, Clone)]
+pub enum ShutdownOpts {
+    IgnoreRunning,
+    CancelTasks(CancelOpts),
+    #[default]
+    WaitForFinish,
+    WaitFor(Duration),
+}
+
+#[derive(Debug, Default)]
+pub enum GarbageCollector {
+    #[default]
+    Disabled,
+    Enabled {
+        expire_after: Duration,
+        interval: Duration,
+    },
+}
+
+impl GarbageCollector {
+    pub fn enabled(expire_after: Duration, interval: Duration) -> Self {
+        Self::Enabled {
+            expire_after,
+            interval,
+        }
+    }
+
+    pub fn disabled() -> Self {
+        Self::Disabled
+    }
+}
+
+impl GarbageCollector {
+    async fn collect_garbage(tasks: Arc<RwLock<HashMap<TaskId, Task>>>, expire_after: Duration) {
+        let mut tasks = tasks.write().await;
+        let expired_at = SystemTime::now().checked_sub(expire_after).unwrap();
+
+        let to_remove: Vec<TaskId> = tasks
+            .iter()
+            .filter(|(_id, task)| task.state.finished())
+            .filter(|(_id, task)| {
+                task.state
+                    .last_finished_at()
+                    .expect("finished task has no `finished_at` time set, looks like a BUG")
+                    <= expired_at
+            })
+            .map(|(id, _task)| id.clone())
+            .collect();
+
+        to_remove.iter().for_each(|id| {
+            debug!("collect_garbage: remove expired task={id}");
+            tasks.remove(id);
+        });
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SchedulerBuilder {
+    worker_type: WorkerType,
+    parallelism: WorkerParallelism,
+    garbage_collector: GarbageCollector,
+}
+
+impl SchedulerBuilder {
+    pub fn new() -> Self {
+        Self {
+            worker_type: WorkerType::default(),
+            parallelism: WorkerParallelism::default(),
+            garbage_collector: GarbageCollector::default(),
+        }
+    }
+
+    pub fn worker_type(self, worker_type: WorkerType) -> Self {
+        Self {
+            worker_type,
+            ..self
+        }
+    }
+
+    pub fn parallelism(self, parallelism: WorkerParallelism) -> Self {
+        Self {
+            parallelism,
+            ..self
+        }
+    }
+
+    pub fn garbage_collector(self, garbage_collector: GarbageCollector) -> Self {
+        Self {
+            garbage_collector,
+            ..self
+        }
+    }
+
+    pub fn build(self) -> Scheduler {
+        Scheduler::new(self.worker_type, self.parallelism, self.garbage_collector)
+    }
+}
+
 impl Scheduler {
-    pub fn new(worker_type: WorkerType, parallelism: WorkerParallelism) -> Self {
+    pub fn new(
+        worker_type: WorkerType,
+        parallelism: WorkerParallelism,
+        garbage_collector: GarbageCollector,
+    ) -> Self {
         debug!("new: type={:?}, parallelism={parallelism:?}", worker_type);
         let channel = ControlChannel::<ChangeStateEvent>::new(SCHEDULER_CONTROL_CHANNEL_SIZE);
         let tasks = Arc::new(RwLock::new(HashMap::new()));
@@ -65,6 +215,7 @@ impl Scheduler {
                 parallelism,
                 tasks.clone(),
                 channel,
+                garbage_collector,
             )),
         }
     }
@@ -74,10 +225,38 @@ impl Scheduler {
         parallelism: WorkerParallelism,
         tasks: Arc<RwLock<HashMap<TaskId, Task>>>,
         channel: ControlChannel<ChangeStateEvent>,
+        garbage_collector: GarbageCollector,
     ) -> Result<()> {
         let queue = Queue::default();
         let executor = Executor::new(worker_type, parallelism);
         let mut jobs: HashMap<JobId, TaskId> = HashMap::new();
+
+        match garbage_collector {
+            GarbageCollector::Disabled => {}
+            GarbageCollector::Enabled {
+                expire_after,
+                interval,
+            } => {
+                // Prepare GC task
+                let tasks = tasks.clone();
+                let task = Task::new(
+                    crate::task::TaskSchedule::RepeatByIntervalDelayed(interval),
+                    move |id| {
+                        let tasks = tasks.clone();
+                        Box::pin(async move {
+                            debug!("garbage_collector: GC job {id} started.");
+                            GarbageCollector::collect_garbage(tasks, expire_after).await;
+                            debug!("garbage_collector: GC job {id} finished.");
+                        })
+                    },
+                );
+                // Enqueue GC task, it will be processed in first run of events loop
+                channel
+                    .send(ChangeStateEvent::EnqueueTask(task))
+                    .await
+                    .map_err(|_e| Error::SendingChangeStateEvent)?;
+            }
+        }
 
         debug!("work: start events loop");
         loop {
@@ -196,13 +375,17 @@ impl Scheduler {
 
 impl Default for Scheduler {
     fn default() -> Self {
-        Self::new(WorkerType::default(), WorkerParallelism::default())
+        Self::new(
+            WorkerType::default(),
+            WorkerParallelism::default(),
+            GarbageCollector::default(),
+        )
     }
 }
 
 impl TaskScheduler for Scheduler {
     async fn add(&self, task: Task) -> Result<TaskId> {
-        let id = TaskId::new();
+        let id = task.id();
         self.send_event(ChangeStateEvent::EnqueueTask(task)).await?;
         Ok(id)
     }
@@ -211,20 +394,20 @@ impl TaskScheduler for Scheduler {
         self.send_event(ChangeStateEvent::DropTask(id, opts)).await
     }
 
-    async fn status(&self, id: TaskId) -> Result<TaskStatus> {
+    async fn status(&self, id: &TaskId) -> Result<TaskStatus> {
         let mut tasks = self.tasks.write().await;
-        let task = tasks.get_mut(&id);
+        let task = tasks.get_mut(id);
 
         if let Some(task) = task {
             let status = task.state.status();
             if task.state.finished() {
                 debug!("status: remove finished task {id}");
-                tasks.remove(&id);
+                tasks.remove(id);
             }
             return Ok(status);
         }
 
-        Err(Error::IncorrectTaskId(id))
+        Err(Error::IncorrectTaskId(id.clone()))
     }
 
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
@@ -251,59 +434,6 @@ impl TaskScheduler for Scheduler {
             }
         }
     }
-}
-
-/// Type of `Tokio` runtime to use for jobs worker.
-#[derive(Debug, Default)]
-pub enum WorkerType {
-    /// Use current runtime instead of creating new one.
-    ///
-    /// This is the simplest and lightest worker because it uses runtime of the calling context.
-    /// This is default type.
-    #[default]
-    CurrentRuntime,
-    /// Creates new thread and runs new `Tokio` runtime of `CurrentThread` type. Single thread worker.
-    CurrentThread,
-    /// Creates new thread and runs new `Tokio` runtime of `MultiThread` type.
-    ///
-    /// This is multi thread worker. Number of threads to use can be specified via parameter.
-    /// Default is `Tokio` default - number of CPU cores.
-    MultiThread(RuntimeThreads),
-}
-
-#[derive(Debug, Default)]
-pub enum RuntimeThreads {
-    #[default]
-    CpuCores,
-    Limited(usize),
-}
-
-#[derive(Debug)]
-pub enum WorkerParallelism {
-    Unlimited,
-    Limited(usize),
-}
-
-impl Default for WorkerParallelism {
-    fn default() -> Self {
-        Self::Limited(DEFAULT_MAX_PARALLEL_JOBS)
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub enum CancelOpts {
-    #[default]
-    Ignore,
-    Kill,
-}
-
-#[derive(Debug, Default, Clone)]
-pub enum ShutdownOpts {
-    IgnoreRunning,
-    CancelTasks(CancelOpts),
-    #[default]
-    WaitForFinish,
-    WaitFor(Duration),
 }
 
 #[cfg(test)]
@@ -364,7 +494,11 @@ mod test {
             Duration::from_secs(3),
             Duration::from_secs(1),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(1));
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Limited(1),
+            GarbageCollector::default(),
+        );
 
         let (logs, jobs) =
             basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(5))
@@ -398,7 +532,11 @@ mod test {
             Duration::from_millis(3000),
             Duration::from_millis(1),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(2));
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Limited(2),
+            GarbageCollector::default(),
+        );
 
         let (logs, jobs) =
             basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(5))
@@ -437,7 +575,11 @@ mod test {
             Duration::from_millis(1400),
             Duration::from_millis(2000),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Unlimited);
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Unlimited,
+            GarbageCollector::default(),
+        );
 
         let (logs, jobs) =
             basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(1))
@@ -469,7 +611,11 @@ mod test {
             TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap()),
         ]);
         let durations = [Duration::from_millis(1200), Duration::from_millis(3500)];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(2));
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Limited(2),
+            GarbageCollector::default(),
+        );
 
         // wait for next 10 seconds interval
         let now = SystemTime::now()
@@ -536,7 +682,11 @@ mod test {
             Duration::from_secs(1),
             Duration::from_secs(1),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(4));
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Limited(4),
+            GarbageCollector::default(),
+        );
 
         let (logs, jobs) =
             basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(4))
@@ -573,7 +723,11 @@ mod test {
             Duration::from_secs(5),
             Duration::from_secs(1),
         ];
-        let scheduler = Scheduler::new(WorkerType::CurrentRuntime, WorkerParallelism::Limited(4));
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Limited(4),
+            GarbageCollector::default(),
+        );
 
         let (logs, jobs) = basic_test_suite(
             scheduler,
@@ -604,5 +758,61 @@ mod test {
             format!("1,finish,{}", jobs[6]),
         ]);
         assert_eq!(logs, expected);
+    }
+
+    #[tokio::test]
+    async fn garbage_collector() {
+        let scheduler = SchedulerBuilder::new()
+            .garbage_collector(GarbageCollector::enabled(
+                Duration::from_millis(2500),
+                Duration::from_millis(500),
+            ))
+            .build();
+
+        // Every 100ms work for 2s
+        let task_1 = Task::new(
+            TaskSchedule::RepeatByInterval(Duration::from_millis(100)),
+            |_id| {
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                })
+            },
+        );
+        // Once work for 4s
+        let task_2 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(4)).await;
+            })
+        });
+        // Once work for 8s
+        let task_3 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(8)).await;
+            })
+        });
+
+        let id_1 = scheduler.add(task_1).await.unwrap();
+        let id_2 = scheduler.add(task_2).await.unwrap();
+        let id_3 = scheduler.add(task_3).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(3500)).await;
+        assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id_2).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id_3).await.unwrap(), TaskStatus::Running);
+
+        tokio::time::sleep(Duration::from_millis(4400)).await;
+        assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
+        assert!(scheduler.status(&id_2).await.is_err());
+        assert_eq!(scheduler.status(&id_3).await.unwrap(), TaskStatus::Running);
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
+        assert!(scheduler.status(&id_2).await.is_err());
+        assert_eq!(scheduler.status(&id_3).await.unwrap(), TaskStatus::Finished);
+
+        scheduler
+            .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
+            .await
+            .unwrap();
     }
 }

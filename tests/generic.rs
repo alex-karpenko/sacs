@@ -1,6 +1,7 @@
 use sacs::{
     scheduler::{
-        RuntimeThreads, Scheduler, ShutdownOpts, TaskScheduler, WorkerParallelism, WorkerType,
+        GarbageCollector, RuntimeThreads, Scheduler, ShutdownOpts, TaskScheduler,
+        WorkerParallelism, WorkerType,
     },
     task::{Task, TaskSchedule},
     Result,
@@ -66,7 +67,11 @@ async fn single_worker(worker_type: WorkerType) {
         Duration::from_secs(4),
         Duration::from_secs(5),
     ];
-    let scheduler = Scheduler::new(worker_type, WorkerParallelism::Limited(1));
+    let scheduler = Scheduler::new(
+        worker_type,
+        WorkerParallelism::Limited(1),
+        GarbageCollector::default(),
+    );
 
     let (logs, jobs) = basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(15))
         .await
@@ -90,7 +95,11 @@ async fn four_workers(worker_type: WorkerType) {
         Duration::from_secs(4),
         Duration::from_secs(5),
     ];
-    let scheduler = Scheduler::new(worker_type, WorkerParallelism::Limited(4));
+    let scheduler = Scheduler::new(
+        worker_type,
+        WorkerParallelism::Limited(4),
+        GarbageCollector::default(),
+    );
 
     let (logs, jobs) = basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(15))
         .await
@@ -114,7 +123,11 @@ async fn unlimited_workers(worker_type: WorkerType) {
         Duration::from_secs(4),
         Duration::from_secs(5),
     ];
-    let scheduler = Scheduler::new(worker_type, WorkerParallelism::Unlimited);
+    let scheduler = Scheduler::new(
+        worker_type,
+        WorkerParallelism::Unlimited,
+        GarbageCollector::default(),
+    );
 
     let (logs, jobs) = basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(15))
         .await

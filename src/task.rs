@@ -2,7 +2,7 @@
 //!
 //!
 use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error};
-use chrono::Local;
+use chrono::{DateTime, Local};
 use cron::Schedule;
 use futures::Future;
 use std::{
@@ -182,7 +182,7 @@ pub enum TaskStatus {
     Finished,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct TaskState {
     waiting: usize,
     scheduled: usize,
@@ -191,6 +191,28 @@ pub(crate) struct TaskState {
     cancelled: usize,
     scheduled_jobs: BTreeSet<JobId>,
     running_jobs: BTreeSet<JobId>,
+    last_finished_at: Option<SystemTime>,
+}
+
+impl std::fmt::Debug for TaskState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let last_finished_at = if let Some(last_finished_at) = self.last_finished_at {
+            format!("{}", DateTime::<Local>::from(last_finished_at))
+        } else {
+            format!("None")
+        };
+
+        f.debug_struct("TaskState")
+            .field("waiting", &self.waiting)
+            .field("scheduled", &self.scheduled)
+            .field("running", &self.running)
+            .field("completed", &self.completed)
+            .field("cancelled", &self.cancelled)
+            .field("scheduled_jobs", &self.scheduled_jobs)
+            .field("running_jobs", &self.running_jobs)
+            .field("last_finished_at", &last_finished_at)
+            .finish()
+    }
 }
 
 impl TaskState {
@@ -235,6 +257,7 @@ impl TaskState {
         self.running -= 1;
         self.completed += 1;
         self.running_jobs.remove(id);
+        self.last_finished_at = Some(SystemTime::now());
         debug!("completed: status={:?}, {self:?}", self.status());
         self
     }
@@ -247,6 +270,7 @@ impl TaskState {
             self.scheduled_jobs.remove(id);
             self.scheduled -= 1;
         }
+        self.last_finished_at = Some(SystemTime::now());
         debug!("cancelled: status={:?}, {self:?}", self.status());
         self
     }
@@ -258,6 +282,10 @@ impl TaskState {
             && (self.completed + self.cancelled) > 0
             && self.scheduled_jobs.is_empty()
             && self.running_jobs.is_empty()
+    }
+
+    pub(crate) fn last_finished_at(&self) -> Option<SystemTime> {
+        self.last_finished_at
     }
 
     pub fn jobs(&self) -> BTreeSet<JobId> {
@@ -376,33 +404,41 @@ mod test {
         let mut state = TaskState::default();
         assert_eq!(state.status(), TaskStatus::New);
         assert!(!state.finished());
+        assert!(state.last_finished_at().is_none());
 
         state.enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
         assert!(!state.finished());
+        assert!(state.last_finished_at().is_none());
 
         state.enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
         assert!(!state.finished());
+        assert!(state.last_finished_at().is_none());
 
         state.scheduled(job1.clone());
         assert_eq!(state.status(), TaskStatus::Scheduled);
         assert!(!state.finished());
+        assert!(state.last_finished_at().is_none());
 
         state.started(job1.clone());
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
+        assert!(state.last_finished_at().is_none());
 
         state.scheduled(job2.clone());
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
+        assert!(state.last_finished_at().is_none());
 
         state.cancelled(&job2);
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
+        assert!(state.last_finished_at().is_some());
 
         state.completed(&job1);
         assert_eq!(state.status(), TaskStatus::Finished);
         assert!(state.finished());
+        assert!(state.last_finished_at().is_some());
     }
 }

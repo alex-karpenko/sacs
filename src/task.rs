@@ -2,7 +2,7 @@
 //!
 //!
 use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error};
-use chrono::Utc;
+use chrono::Local;
 use cron::Schedule;
 use futures::Future;
 use std::{
@@ -281,7 +281,7 @@ impl Display for CronSchedule {
 
 impl CronSchedule {
     fn upcoming(&self) -> SystemTime {
-        let next: SystemTime = self.schedule.upcoming(Utc).take(1).next().unwrap().into();
+        let next: SystemTime = self.schedule.upcoming(Local).take(1).next().unwrap().into();
         next
     }
 }

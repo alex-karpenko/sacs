@@ -1,11 +1,11 @@
 # **SACS** - Simple Asynchronous Cron Scheduler
 
-`SACS` is easy to use, lightweight scheduler and executor of repeatable async tasks for Tokio runtime.
+`SACS` is easy to use, lightweight scheduler and executor of repeatable async tasks for `Tokio` runtime.
 
 ## Features
 
 - Runs tasks with different types of schedule: once, with delay, by interval, with cron schedule.
-- Uses current Tokio runtime or creates new one with specified type, number of threads and restricted parallelism.
+- Uses current `Tokio` runtime or creates new one with specified type, number of threads and limited parallelism.
 - Allows task cancellation and getting current state of task.
 - Lightweight, small, easy to use.
 
@@ -13,9 +13,11 @@
 
 Just create `Scheduler` and add `Task` to it.
 
+Refer to the crate's documentation for more examples and details of possible usage.
+
 ```rust
 use sacs::{
-    scheduler::{Scheduler, TaskScheduler},
+    scheduler::{Scheduler, ShutdownOpts, TaskScheduler},
     task::{Task, TaskSchedule},
     Result,
 };
@@ -41,19 +43,17 @@ async fn main() -> Result<()> {
         })
     });
 
-    // Post task to scheduler and forget it :)
-    scheduler.add(task).await;
+    // Post task to the scheduler and forget it :)
+    let _task_id = scheduler.add(task).await?;
 
-    // ... and do any other async work
+    // ... and do any other async work in parallel
     tokio::time::sleep(Duration::from_secs(10)).await;
 
-    // It's not mandatory but good to shutdown scheduler.
+    // It's not mandatory but good to shutdown scheduler
     // Wait for completion of all running jobs
-    scheduler.shutdown(true).await
+    scheduler.shutdown(ShutdownOpts::WaitForFinish).await
 }
 ```
-
-Refer to crate documentation for more examples and details of possible variants of usage.
 
 ## License
 

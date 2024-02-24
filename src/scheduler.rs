@@ -53,7 +53,7 @@ enum ChangeStateEvent {
 
 impl Scheduler {
     pub fn new(worker_type: WorkerType, parallelism: WorkerParallelism) -> Self {
-        debug!("new: type={:?}, max jobs={parallelism:?}", worker_type);
+        debug!("new: type={:?}, parallelism={parallelism:?}", worker_type);
         let channel = ControlChannel::<ChangeStateEvent>::new(SCHEDULER_CONTROL_CHANNEL_SIZE);
         let tasks = Arc::new(RwLock::new(HashMap::new()));
 

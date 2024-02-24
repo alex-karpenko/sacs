@@ -41,7 +41,7 @@ impl ExecutorJobsState {
 
 impl Executor {
     pub fn new(worker_type: WorkerType, parallelism: WorkerParallelism) -> Self {
-        debug!("new: type={:?}, max jobs={parallelism:?}", worker_type);
+        debug!("new: type={:?}, parallelism={parallelism:?}", worker_type);
         let executor_channel = ControlChannel::new(EXECUTOR_CONTROL_CHANNEL_SIZE);
         let to_executor = executor_channel.sender();
 

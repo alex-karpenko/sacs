@@ -669,6 +669,137 @@ mod test {
     }
 
     #[tokio::test]
+    async fn cron_at_start() {
+        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::RepeatByCron(
+            "*/5 * * * * *".try_into().unwrap(),
+            CronOpts {
+                at_start: true,
+                concurrent: false,
+            },
+        )]);
+        let durations = [Duration::from_millis(1000)];
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Unlimited,
+            GarbageCollector::default(),
+        );
+
+        // wait for next 5 seconds interval
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let wait_for = 5 - now % 5 + 1;
+        tokio::time::sleep(Duration::from_secs(wait_for)).await;
+
+        let (logs, jobs) =
+            basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(6))
+                .await
+                .unwrap();
+
+        assert_eq!(logs.len(), 4);
+        assert_eq!(jobs.len(), 2);
+
+        let expected: Vec<String> = Vec::from([
+            format!("0,start,{}", jobs[0]),
+            format!("0,finish,{}", jobs[0]),
+            format!("0,start,{}", jobs[1]),
+            format!("0,finish,{}", jobs[1]),
+        ]);
+        let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
+        assert!(logs == expected, "{debug}");
+    }
+
+    #[tokio::test]
+    async fn cron_non_concurrent() {
+        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::RepeatByCron(
+            "*/5 * * * * *".try_into().unwrap(),
+            CronOpts {
+                at_start: true,
+                concurrent: false,
+            },
+        )]);
+        let durations = [Duration::from_millis(7000)];
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Unlimited,
+            GarbageCollector::default(),
+        );
+
+        // wait for next 5 seconds interval
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let wait_for = 5 - now % 5 + 1;
+        tokio::time::sleep(Duration::from_secs(wait_for)).await;
+
+        let (logs, jobs) =
+            basic_test_suite(scheduler, schedules, &durations, Duration::from_secs(6))
+                .await
+                .unwrap();
+
+        assert_eq!(logs.len(), 2);
+        assert_eq!(jobs.len(), 1);
+
+        let expected: Vec<String> = Vec::from([
+            format!("0,start,{}", jobs[0]),
+            format!("0,finish,{}", jobs[0]),
+        ]);
+        let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
+        assert!(logs == expected, "{debug}");
+    }
+
+    #[tokio::test]
+    async fn cron_concurrent() {
+        tracing_subscriber::fmt::init();
+        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::RepeatByCron(
+            "*/3 * * * * *".try_into().unwrap(),
+            CronOpts {
+                at_start: true,
+                concurrent: true,
+            },
+        )]);
+        let durations = [Duration::from_millis(3900)];
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Unlimited,
+            GarbageCollector::default(),
+        );
+
+        // wait for next 3 seconds interval
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let wait_for = 3 - now % 3 + 1;
+        tokio::time::sleep(Duration::from_secs(wait_for)).await;
+
+        let (logs, jobs) = basic_test_suite(
+            scheduler,
+            schedules,
+            &durations,
+            Duration::from_millis(5000),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(logs.len(), 6);
+        assert_eq!(jobs.len(), 3);
+
+        let expected: Vec<String> = Vec::from([
+            format!("0,start,{}", jobs[0]),
+            format!("0,start,{}", jobs[1]),
+            format!("0,finish,{}", jobs[0]),
+            format!("0,start,{}", jobs[2]),
+            format!("0,finish,{}", jobs[1]),
+            format!("0,finish,{}", jobs[2]),
+        ]);
+        let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
+        assert!(logs == expected, "{debug}");
+    }
+
+    #[tokio::test]
     async fn once_delayed_4_workers() {
         let schedules: Vec<TaskSchedule> = Vec::from([
             TaskSchedule::Once,

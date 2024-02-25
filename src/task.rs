@@ -190,10 +190,10 @@ impl TaskSchedule {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CronOpts {
-    at_start: bool,
-    concurrent: bool,
+    pub at_start: bool,
+    pub concurrent: bool,
 }
 
 #[derive(Default, Clone, PartialEq, Debug)]
@@ -464,5 +464,16 @@ mod test {
         assert_eq!(state.status(), TaskStatus::Finished);
         assert!(state.finished());
         assert!(state.last_finished_at().is_some());
+    }
+
+    #[test]
+    fn cron_opts_default() {
+        assert_eq!(
+            CronOpts::default(),
+            CronOpts {
+                at_start: false,
+                concurrent: false
+            }
+        );
     }
 }

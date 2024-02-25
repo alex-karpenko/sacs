@@ -56,9 +56,9 @@ async fn single_worker(worker_type: WorkerType) {
     let schedules: Vec<TaskSchedule> = Vec::from([
         TaskSchedule::Once,
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
-        TaskSchedule::RepeatByInterval(Duration::from_secs(2)),
-        TaskSchedule::RepeatByIntervalDelayed(Duration::from_secs(3)),
-        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
+        TaskSchedule::Interval(Duration::from_secs(2)),
+        TaskSchedule::IntervalDelayed(Duration::from_secs(3)),
+        TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [
         Duration::from_secs(1),
@@ -84,9 +84,9 @@ async fn four_workers(worker_type: WorkerType) {
     let schedules: Vec<TaskSchedule> = Vec::from([
         TaskSchedule::Once,
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
-        TaskSchedule::RepeatByInterval(Duration::from_secs(2)),
-        TaskSchedule::RepeatByIntervalDelayed(Duration::from_secs(3)),
-        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
+        TaskSchedule::Interval(Duration::from_secs(2)),
+        TaskSchedule::IntervalDelayed(Duration::from_secs(3)),
+        TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [
         Duration::from_secs(1),
@@ -112,9 +112,9 @@ async fn unlimited_workers(worker_type: WorkerType) {
     let schedules: Vec<TaskSchedule> = Vec::from([
         TaskSchedule::Once,
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
-        TaskSchedule::RepeatByInterval(Duration::from_secs(2)),
-        TaskSchedule::RepeatByIntervalDelayed(Duration::from_secs(3)),
-        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
+        TaskSchedule::Interval(Duration::from_secs(2)),
+        TaskSchedule::IntervalDelayed(Duration::from_secs(3)),
+        TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [
         Duration::from_secs(1),

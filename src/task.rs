@@ -130,9 +130,9 @@ impl Display for TaskId {
 pub enum TaskSchedule {
     Once,
     OnceDelayed(Duration),
-    RepeatByInterval(Duration),
-    RepeatByIntervalDelayed(Duration),
-    RepeatByCron(CronSchedule, CronOpts),
+    Interval(Duration),
+    IntervalDelayed(Duration),
+    Cron(CronSchedule, CronOpts),
 }
 
 impl TaskSchedule {
@@ -140,11 +140,11 @@ impl TaskSchedule {
         match self {
             TaskSchedule::Once => SystemTime::now(),
             TaskSchedule::OnceDelayed(delay) => SystemTime::now().checked_add(*delay).unwrap(),
-            TaskSchedule::RepeatByInterval(_interval) => SystemTime::now(),
-            TaskSchedule::RepeatByIntervalDelayed(interval) => {
+            TaskSchedule::Interval(_interval) => SystemTime::now(),
+            TaskSchedule::IntervalDelayed(interval) => {
                 SystemTime::now().checked_add(*interval).unwrap()
             }
-            TaskSchedule::RepeatByCron(schedule, opts) => {
+            TaskSchedule::Cron(schedule, opts) => {
                 if opts.at_start {
                     SystemTime::now()
                 } else {
@@ -156,7 +156,7 @@ impl TaskSchedule {
 
     pub fn after_start_run_time(&self) -> Option<SystemTime> {
         match self {
-            TaskSchedule::RepeatByCron(schedule, opts) => {
+            TaskSchedule::Cron(schedule, opts) => {
                 if opts.concurrent {
                     Some(schedule.upcoming())
                 } else {
@@ -165,21 +165,21 @@ impl TaskSchedule {
             }
             TaskSchedule::Once => None,
             TaskSchedule::OnceDelayed(_) => None,
-            TaskSchedule::RepeatByInterval(_) => None,
-            TaskSchedule::RepeatByIntervalDelayed(_) => None,
+            TaskSchedule::Interval(_) => None,
+            TaskSchedule::IntervalDelayed(_) => None,
         }
     }
     pub fn after_finish_run_time(&self) -> Option<SystemTime> {
         match self {
-            TaskSchedule::RepeatByInterval(interval) => {
+            TaskSchedule::Interval(interval) => {
                 Some(SystemTime::now().checked_add(*interval).unwrap())
             }
-            TaskSchedule::RepeatByIntervalDelayed(interval) => {
+            TaskSchedule::IntervalDelayed(interval) => {
                 Some(SystemTime::now().checked_add(*interval).unwrap())
             }
             TaskSchedule::Once => None,
             TaskSchedule::OnceDelayed(_) => None,
-            TaskSchedule::RepeatByCron(schedule, opts) => {
+            TaskSchedule::Cron(schedule, opts) => {
                 if opts.concurrent {
                     None
                 } else {

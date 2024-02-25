@@ -240,7 +240,7 @@ impl Scheduler {
                 // Prepare GC task
                 let tasks = tasks.clone();
                 let task = Task::new(
-                    crate::task::TaskSchedule::RepeatByIntervalDelayed(interval),
+                    crate::task::TaskSchedule::IntervalDelayed(interval),
                     move |id| {
                         let tasks = tasks.clone();
                         Box::pin(async move {
@@ -607,8 +607,8 @@ mod test {
     #[tokio::test]
     async fn cron() {
         let schedules: Vec<TaskSchedule> = Vec::from([
-            TaskSchedule::RepeatByCron("*/2 * * * * *".try_into().unwrap(), CronOpts::default()),
-            TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
+            TaskSchedule::Cron("*/2 * * * * *".try_into().unwrap(), CronOpts::default()),
+            TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
         ]);
         let durations = [Duration::from_millis(1200), Duration::from_millis(3500)];
         let scheduler = Scheduler::new(
@@ -670,7 +670,7 @@ mod test {
 
     #[tokio::test]
     async fn cron_at_start() {
-        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::RepeatByCron(
+        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::Cron(
             "*/5 * * * * *".try_into().unwrap(),
             CronOpts {
                 at_start: true,
@@ -712,7 +712,7 @@ mod test {
 
     #[tokio::test]
     async fn cron_non_concurrent() {
-        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::RepeatByCron(
+        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::Cron(
             "*/5 * * * * *".try_into().unwrap(),
             CronOpts {
                 at_start: true,
@@ -753,7 +753,7 @@ mod test {
     #[tokio::test]
     async fn cron_concurrent() {
         tracing_subscriber::fmt::init();
-        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::RepeatByCron(
+        let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::Cron(
             "*/3 * * * * *".try_into().unwrap(),
             CronOpts {
                 at_start: true,
@@ -843,10 +843,10 @@ mod test {
     #[tokio::test]
     async fn interval_4_workers() {
         let schedules: Vec<TaskSchedule> = Vec::from([
-            TaskSchedule::RepeatByInterval(Duration::from_secs(3)),
-            TaskSchedule::RepeatByInterval(Duration::from_secs(1)),
-            TaskSchedule::RepeatByIntervalDelayed(Duration::from_millis(2100)),
-            TaskSchedule::RepeatByIntervalDelayed(Duration::from_millis(5900)),
+            TaskSchedule::Interval(Duration::from_secs(3)),
+            TaskSchedule::Interval(Duration::from_secs(1)),
+            TaskSchedule::IntervalDelayed(Duration::from_millis(2100)),
+            TaskSchedule::IntervalDelayed(Duration::from_millis(5900)),
         ]);
         let durations = [
             Duration::from_millis(900),
@@ -902,7 +902,7 @@ mod test {
 
         // Every 100ms work for 2s
         let task_1 = Task::new(
-            TaskSchedule::RepeatByInterval(Duration::from_millis(100)),
+            TaskSchedule::Interval(Duration::from_millis(100)),
             |_id| {
                 Box::pin(async move {
                     tokio::time::sleep(Duration::from_secs(2)).await;

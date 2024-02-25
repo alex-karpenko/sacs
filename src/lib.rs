@@ -12,7 +12,7 @@
 //! ## Quick start
 //!
 //! Just create `Scheduler` and add `Task` to it. Refer to [`scheduler`] and [`task`] modules documentation
-//! for more examples and details of possible variants of usage.
+//! for more examples and details of possible usage.
 //!
 //! ```rust
 //! use sacs::{

@@ -31,7 +31,7 @@
 //!     let scheduler = Scheduler::default();
 //!
 //!     // Create task with cron schedule: repeat it every 3 seconds
-//!     let cron = TaskSchedule::RepeatByCron("*/3 * * * * *".try_into()?, CronOpts::default());
+//!     let cron = TaskSchedule::Cron("*/3 * * * * *".try_into()?, CronOpts::default());
 //!     let task = Task::new(cron, |id| {
 //!         Box::pin(async move {
 //!             info!("Job {id} started.");
@@ -58,9 +58,7 @@ mod event;
 mod executor;
 mod job;
 mod queue;
-/// `Scheduler` is a heart of the `SACS`. This is an entry point to schedule and control on `Task`s and whole jobs runtime.
 pub mod scheduler;
-/// `Task` object represents single job with schedule. Use it to create workload of different types and post it to `Scheduler`.
 pub mod task;
 mod worker;
 

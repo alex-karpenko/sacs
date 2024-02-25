@@ -1,3 +1,7 @@
+//! Module for first essential structure, [`Scheduler`], which is a heart of the `SACS`.
+//! This is an entry point to schedule and control on [`Tasks`](Task) and whole jobs runtime.
+//!
+//! All other module's content works for [`Scheduler`].
 use crate::{
     event::Event,
     executor::{Executor, JobExecutor},
@@ -24,24 +28,120 @@ const SCHEDULER_CONTROL_CHANNEL_SIZE: usize = 1024;
 #[cfg(feature = "async-trait")]
 #[allow(async_fn_in_trait)]
 pub trait TaskScheduler {
+    /// Posts new [`Task`] to the `Scheduler`.
     async fn add(&self, task: Task) -> Result<TaskId>;
+    /// Cancels existing [`Task`] with respect to [`CancelOpts`].
     async fn drop(&self, id: TaskId, opts: CancelOpts) -> Result<()>;
+    /// Returns current status of the [`Task`] and removes task from the scheduler if it's finished.
     async fn status(&self, id: &TaskId) -> Result<TaskStatus>;
+    /// Shuts down the scheduler with respect to [`ShutdownOpts`].
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
 }
 
+/// Base [`Scheduler`] behavior
 #[cfg(not(feature = "async-trait"))]
 pub trait TaskScheduler {
+    /// Posts new [`Task`] to the `Scheduler`.
     fn add(&self, task: Task) -> impl std::future::Future<Output = Result<TaskId>> + Send;
+    /// Cancels existing [`Task`] with respect to [`CancelOpts`].
     fn drop(
         &self,
         id: TaskId,
         opts: CancelOpts,
     ) -> impl std::future::Future<Output = Result<()>> + Send;
+    /// Returns current status of the [`Task`] and removes task from the scheduler if it's finished.
     fn status(&self, id: &TaskId) -> impl std::future::Future<Output = Result<TaskStatus>> + Send;
+    /// Shuts down the scheduler with respect to [`ShutdownOpts`].
     fn shutdown(self, opts: ShutdownOpts) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
+/// The main work horse of `SACS`. Provides everything needed to run and control [`Tasks`](Task).
+///
+/// ## Overview
+///
+/// [`Scheduler`] runs as independent `Tokio` task (so you don't need to pool it using await/select/join), and it's responsible on:
+/// - provisioning new and removing existing tasks on request
+/// - starting jobs according to the task's schedule
+/// - collecting and providing task's status
+/// - clean scheduler's state from orphaned task's data
+/// - shutdown
+///
+/// [`Scheduler`] uses some kind of it's own "executor" engine under the hood to start jobs on `Tokio` runtime with respect
+/// to provided constrains: runtime type, number of threads and parallelism (maximum number of simultaneously running jobs).
+///
+/// New scheduler can be created using convenient [SchedulerBuilder] or using [`Scheduler::default()`] method or using long version
+/// of the trivial constructor [`Scheduler::new()`]
+///
+/// Each [`Scheduler`] has at least three configuration parameters:
+/// - [`WorkerType`] - type of `Tokio` runtime to use for workload: `CurrentRuntime`, `CurrentThread` or `MultiThread`
+/// - [`WorkerParallelism`] - limits number of simultaneously running jobs, or makes it unlimited
+/// - [`GarbageCollector`] - provide way to clean statuses of orphaned tasks to avoid uncontrolled memory consumption
+///
+/// You can use reasonable default parameters for trivial schedulers or provide yours own (via builder or constructor)
+/// to tune behavior according to your needs. You can run as many schedulers as you need with different configurations.
+///
+/// ## Examples
+///
+/// The simplest config using default constructor:
+/// - use current `Tokio` runtime
+/// - limit workers to 16 jobs
+/// - without garbage collector
+/// ```rust
+/// use sacs::{Result, scheduler::{Scheduler, ShutdownOpts, TaskScheduler}};
+///
+/// #[tokio::main]
+/// async fn default_scheduler() -> Result<()> {
+///     let scheduler = Scheduler::default();
+///     // ...
+///     scheduler.shutdown(ShutdownOpts::IgnoreRunning).await
+/// }
+/// ```
+///
+/// Use separate `MultiThread` `Tokio` runtime:
+/// ```rust
+/// use sacs::{
+///     scheduler::{RuntimeThreads, Scheduler, SchedulerBuilder, ShutdownOpts, TaskScheduler, WorkerType},
+///     Result,
+/// };
+///
+/// #[tokio::main]
+/// async fn multi_thread_scheduler() -> Result<()> {
+///     let scheduler = SchedulerBuilder::new()
+///         .worker_type(WorkerType::MultiThread(RuntimeThreads::CpuCores))
+///         .build();
+///     // ...
+///     scheduler.shutdown(ShutdownOpts::WaitForFinish).await
+/// }
+/// ```
+///
+/// Use separate `MultiThread` `Tokio` runtime with:
+/// - 4 threads
+/// - unlimited number of jobs
+/// - garbage collector with 12 hours expiration time, run it every 15 minutes
+/// ```
+/// use sacs::{
+///     scheduler::{GarbageCollector, RuntimeThreads, Scheduler, SchedulerBuilder, ShutdownOpts, TaskScheduler, WorkerParallelism, WorkerType},
+///     Result,
+/// };
+/// use std::time::Duration;
+///
+/// #[tokio::main]
+/// async fn specific_scheduler() -> Result<()> {
+///     let scheduler = SchedulerBuilder::new()
+///         .worker_type(WorkerType::MultiThread(RuntimeThreads::Limited(4)))
+///         .parallelism(WorkerParallelism::Unlimited)
+///         .garbage_collector(GarbageCollector::Enabled {
+///             expire_after: Duration::from_secs(12 * 60 * 60),
+///             interval: Duration::from_secs(15 * 60),
+///         })
+///         .build();
+///     // ...
+///     scheduler
+///         .shutdown(ShutdownOpts::WaitFor(Duration::from_secs(60)))
+///         .await
+/// }
+/// ```
+///
 pub struct Scheduler {
     tasks: Arc<RwLock<HashMap<TaskId, Task>>>,
     channel: Sender<ChangeStateEvent>,
@@ -73,16 +173,22 @@ pub enum WorkerType {
     MultiThread(RuntimeThreads),
 }
 
+/// Threads number limit for [`Scheduler`] with [`MultiThread`](WorkerType::MultiThread) `Tokio` runtime
 #[derive(Debug, Default)]
 pub enum RuntimeThreads {
+    /// Limits number of thread to number of actual CPU Cores.
     #[default]
     CpuCores,
+    /// Sets limit to specified number.
     Limited(usize),
 }
 
+/// Limit of simultaneously running jobs per [`Scheduler`].
 #[derive(Debug)]
 pub enum WorkerParallelism {
+    /// No limits, use whole potential of your machine.
     Unlimited,
+    /// Run no more simultaneous jobs than specified (default with 16 jobs).
     Limited(usize),
 }
 
@@ -92,26 +198,37 @@ impl Default for WorkerParallelism {
     }
 }
 
+/// Define [`Task`] cancellation behavior.
 #[derive(Debug, Default, Clone)]
 pub enum CancelOpts {
+    /// Orphans task an lets it continue working (default).
     #[default]
     Ignore,
+    /// Cancel it.
     Kill,
 }
 
+/// Define how to shutdown [`Scheduler`] with running tasks.
 #[derive(Debug, Default, Clone)]
 pub enum ShutdownOpts {
+    /// Lets running tasks continue working.
     IgnoreRunning,
+    /// Cancel tasks with respect to [`CancelOpts`].
     CancelTasks(CancelOpts),
+    /// Wait until all tasks finish (default).
     #[default]
     WaitForFinish,
+    /// Wait until all tasks finish but no more than specified time. Returns [`Error::IncompleteShutdown`] if timeout.
     WaitFor(Duration),
 }
 
+/// Define parameters of orphaned task's garbage collector.
 #[derive(Debug, Default)]
 pub enum GarbageCollector {
+    /// Don't collect garbage (default).
     #[default]
     Disabled,
+    /// Run garbage collector every `interval` time and clean up tasks which have been finished more than `expire_after` time ago.
     Enabled {
         expire_after: Duration,
         interval: Duration,
@@ -155,6 +272,37 @@ impl GarbageCollector {
     }
 }
 
+/// Convenient way to create customized [`Scheduler`].
+///
+/// It can be used instead of [`Scheduler::new()`] to create Scheduler with
+/// expected parameters.
+///
+/// ## Examples
+///
+/// ```rust
+/// use sacs::{
+///     scheduler::{GarbageCollector, RuntimeThreads, Scheduler, SchedulerBuilder,
+///                 ShutdownOpts, TaskScheduler, WorkerParallelism, WorkerType},
+///     Result,
+/// };
+/// use std::time::Duration;
+///
+/// #[tokio::main]
+/// async fn specific_scheduler() -> Result<()> {
+///     let scheduler = SchedulerBuilder::new()
+///         .worker_type(WorkerType::MultiThread(RuntimeThreads::Limited(4)))
+///         .parallelism(WorkerParallelism::Unlimited)
+///         .garbage_collector(GarbageCollector::Enabled {
+///             expire_after: Duration::from_secs(12 * 60 * 60), // 12 hours
+///             interval: Duration::from_secs(15 * 60),  // 15 minutes
+///         })
+///         .build();
+///     // ...
+///     scheduler
+///         .shutdown(ShutdownOpts::WaitFor(Duration::from_secs(60)))
+///         .await
+/// }
+///```
 #[derive(Debug, Default)]
 pub struct SchedulerBuilder {
     worker_type: WorkerType,
@@ -163,6 +311,7 @@ pub struct SchedulerBuilder {
 }
 
 impl SchedulerBuilder {
+    /// Returns builder instance.
     pub fn new() -> Self {
         Self {
             worker_type: WorkerType::default(),
@@ -171,6 +320,7 @@ impl SchedulerBuilder {
         }
     }
 
+    /// Set type of worker's runtime using [`WorkerType`].
     pub fn worker_type(self, worker_type: WorkerType) -> Self {
         Self {
             worker_type,
@@ -178,6 +328,7 @@ impl SchedulerBuilder {
         }
     }
 
+    /// Set worker's parallelism using [`WorkerParallelism`].
     pub fn parallelism(self, parallelism: WorkerParallelism) -> Self {
         Self {
             parallelism,
@@ -185,6 +336,7 @@ impl SchedulerBuilder {
         }
     }
 
+    /// Define parameters of garbage collector using [`GarbageCollector`].
     pub fn garbage_collector(self, garbage_collector: GarbageCollector) -> Self {
         Self {
             garbage_collector,
@@ -192,12 +344,14 @@ impl SchedulerBuilder {
         }
     }
 
+    /// Build [`Scheduler`] instance.
     pub fn build(self) -> Scheduler {
         Scheduler::new(self.worker_type, self.parallelism, self.garbage_collector)
     }
 }
 
 impl Scheduler {
+    /// Basic [`Scheduler`] constructor. Using of [`SchedulerBuilder`] is another way to construct it with custom parameters.
     pub fn new(
         worker_type: WorkerType,
         parallelism: WorkerParallelism,
@@ -384,16 +538,29 @@ impl Default for Scheduler {
 }
 
 impl TaskScheduler for Scheduler {
+    /// Post new [`Task`] to scheduler.
+    ///
+    /// Right after that task will be staring to execute according to it's schedule.
+    ///
+    /// Returns [`TaskId`] of the scheduled task.
     async fn add(&self, task: Task) -> Result<TaskId> {
         let id = task.id();
         self.send_event(ChangeStateEvent::EnqueueTask(task)).await?;
         Ok(id)
     }
 
+    /// Removes [`Task`] with specified [`TaskId`] from the scheduler with respect to [`CancelOpts`]:
+    /// task can be killed or left to continue working up to finish.
+    ///
+    /// Returns [`Error::IncorrectTaskId`] if task is not scheduled or cleaned by garbage collector.
     async fn drop(&self, id: TaskId, opts: CancelOpts) -> Result<()> {
         self.send_event(ChangeStateEvent::DropTask(id, opts)).await
     }
 
+    /// Returns current [`status`](TaskStatus) of the task.
+    ///
+    /// If task is finished then it's status will be removed from the scheduler after
+    /// this method call, so following calls with te same `TaskId` will fail with [`Error::IncorrectTaskId`].
     async fn status(&self, id: &TaskId) -> Result<TaskStatus> {
         let mut tasks = self.tasks.write().await;
         let task = tasks.get_mut(id);
@@ -410,6 +577,11 @@ impl TaskScheduler for Scheduler {
         Err(Error::IncorrectTaskId(id.clone()))
     }
 
+    /// Starts process of scheduler shutdown:
+    /// - remove awaiting tasks from the queue
+    /// - shuts down executing engine with respect to [`ShutdownOpts`].
+    ///
+    /// Can return [`Error::IncompleteShutdown`] in case of errors.
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
         debug!("shutdown: requested with opts={opts:?}");
         self.send_event(ChangeStateEvent::Shutdown(opts.clone()))
@@ -901,14 +1073,11 @@ mod test {
             .build();
 
         // Every 100ms work for 2s
-        let task_1 = Task::new(
-            TaskSchedule::Interval(Duration::from_millis(100)),
-            |_id| {
-                Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                })
-            },
-        );
+        let task_1 = Task::new(TaskSchedule::Interval(Duration::from_millis(100)), |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        });
         // Once work for 4s
         let task_2 = Task::new(TaskSchedule::Once, |_id| {
             Box::pin(async move {

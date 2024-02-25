@@ -1,5 +1,6 @@
-//! Module contains everything related to `Task`, it's `Schedule` and state.
+//! `Task` object represents single job with schedule. Use it to create workload of different types and post it to [`Scheduler`].
 //!
+//! Module contains everything related to [`Task`], it's [`TaskSchedule`] and [`state`](TaskStatus).
 //!
 use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error};
 use chrono::{DateTime, Local};
@@ -34,7 +35,7 @@ impl Task {
     /// use sacs::task::{CronOpts, Task, TaskSchedule};
     /// use std::time::Duration;
     ///
-    /// let schedule = TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default());
+    /// let schedule = TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default());
     /// let task = Task::new(schedule, |id| {
     ///     Box::pin(async move {
     ///         // Actual async workload here
@@ -57,14 +58,17 @@ impl Task {
         }
     }
 
+    /// Returns task's [`TaskId`], it can be used to [`drop`](Scheduler::drop()) task or to get it's [`status`](Scheduler::status()).
     pub fn id(&self) -> TaskId {
         self.id.clone()
     }
 
+    /// Returns [`TaskSchedule`] associated with the task.
     pub fn schedule(&self) -> TaskSchedule {
         self.schedule.clone()
     }
 
+    /// Returns task's status.
     pub fn status(&self) -> TaskStatus {
         self.state.status()
     }
@@ -80,12 +84,14 @@ impl std::fmt::Debug for Task {
     }
 }
 
+/// Unique identifier of [`Task`] which can be used to address task in [`Scheduler`].
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub struct TaskId {
     pub(crate) id: Uuid,
 }
 
 impl TaskId {
+    /// Constructs new unique `TaskId`.
     pub fn new() -> Self {
         Self { id: Uuid::new_v4() }
     }

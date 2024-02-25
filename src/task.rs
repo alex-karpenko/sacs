@@ -199,7 +199,7 @@ impl std::fmt::Debug for TaskState {
         let last_finished_at = if let Some(last_finished_at) = self.last_finished_at {
             format!("{}", DateTime::<Local>::from(last_finished_at))
         } else {
-            format!("None")
+            "None".to_string()
         };
 
         f.debug_struct("TaskState")

@@ -31,10 +31,10 @@ impl Task {
     /// # Examples
     ///
     /// ```rust
-    /// use sacs::task::{Task, TaskSchedule};
+    /// use sacs::task::{CronOpts, Task, TaskSchedule};
     /// use std::time::Duration;
     ///
-    /// let schedule = TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap());
+    /// let schedule = TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default());
     /// let task = Task::new(schedule, |id| {
     ///     Box::pin(async move {
     ///         // Actual async workload here

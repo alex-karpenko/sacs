@@ -17,7 +17,7 @@
 //! ```rust
 //! use sacs::{
 //!     scheduler::{Scheduler, ShutdownOpts, TaskScheduler},
-//!     task::{Task, TaskSchedule},
+//!     task::{CronOpts, Task, TaskSchedule},
 //!     Result,
 //! };
 //! use std::time::Duration;
@@ -31,7 +31,7 @@
 //!     let scheduler = Scheduler::default();
 //!
 //!     // Create task with cron schedule: repeat it every 3 seconds
-//!     let cron = TaskSchedule::RepeatByCron("*/3 * * * * *".try_into()?);
+//!     let cron = TaskSchedule::RepeatByCron("*/3 * * * * *".try_into()?, CronOpts::default());
 //!     let task = Task::new(cron, |id| {
 //!         Box::pin(async move {
 //!             info!("Job {id} started.");

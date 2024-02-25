@@ -132,7 +132,7 @@ pub enum TaskSchedule {
     OnceDelayed(Duration),
     RepeatByInterval(Duration),
     RepeatByIntervalDelayed(Duration),
-    RepeatByCron(CronSchedule),
+    RepeatByCron(CronSchedule, CronOpts),
 }
 
 impl TaskSchedule {
@@ -144,13 +144,25 @@ impl TaskSchedule {
             TaskSchedule::RepeatByIntervalDelayed(interval) => {
                 SystemTime::now().checked_add(*interval).unwrap()
             }
-            TaskSchedule::RepeatByCron(schedule) => schedule.upcoming(),
+            TaskSchedule::RepeatByCron(schedule, opts) => {
+                if opts.at_start {
+                    SystemTime::now()
+                } else {
+                    schedule.upcoming()
+                }
+            }
         }
     }
 
     pub fn after_start_run_time(&self) -> Option<SystemTime> {
         match self {
-            TaskSchedule::RepeatByCron(schedule) => Some(schedule.upcoming()),
+            TaskSchedule::RepeatByCron(schedule, opts) => {
+                if opts.concurrent {
+                    Some(schedule.upcoming())
+                } else {
+                    None
+                }
+            }
             TaskSchedule::Once => None,
             TaskSchedule::OnceDelayed(_) => None,
             TaskSchedule::RepeatByInterval(_) => None,
@@ -167,9 +179,21 @@ impl TaskSchedule {
             }
             TaskSchedule::Once => None,
             TaskSchedule::OnceDelayed(_) => None,
-            TaskSchedule::RepeatByCron(_) => None,
+            TaskSchedule::RepeatByCron(schedule, opts) => {
+                if opts.concurrent {
+                    None
+                } else {
+                    Some(schedule.upcoming())
+                }
+            }
         }
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CronOpts {
+    at_start: bool,
+    concurrent: bool,
 }
 
 #[derive(Default, Clone, PartialEq, Debug)]

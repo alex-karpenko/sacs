@@ -3,7 +3,7 @@ use sacs::{
         GarbageCollector, RuntimeThreads, Scheduler, ShutdownOpts, TaskScheduler,
         WorkerParallelism, WorkerType,
     },
-    task::{Task, TaskSchedule},
+    task::{CronOpts, Task, TaskSchedule},
     Result,
 };
 use std::{sync::Arc, time::Duration};
@@ -58,7 +58,7 @@ async fn single_worker(worker_type: WorkerType) {
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
         TaskSchedule::RepeatByInterval(Duration::from_secs(2)),
         TaskSchedule::RepeatByIntervalDelayed(Duration::from_secs(3)),
-        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap()),
+        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [
         Duration::from_secs(1),
@@ -86,7 +86,7 @@ async fn four_workers(worker_type: WorkerType) {
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
         TaskSchedule::RepeatByInterval(Duration::from_secs(2)),
         TaskSchedule::RepeatByIntervalDelayed(Duration::from_secs(3)),
-        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap()),
+        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [
         Duration::from_secs(1),
@@ -114,7 +114,7 @@ async fn unlimited_workers(worker_type: WorkerType) {
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
         TaskSchedule::RepeatByInterval(Duration::from_secs(2)),
         TaskSchedule::RepeatByIntervalDelayed(Duration::from_secs(3)),
-        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap()),
+        TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [
         Duration::from_secs(1),

@@ -439,7 +439,7 @@ impl TaskScheduler for Scheduler {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::task::TaskSchedule;
+    use crate::task::{CronOpts, TaskSchedule};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use uuid::Uuid;
 
@@ -607,8 +607,8 @@ mod test {
     #[tokio::test]
     async fn cron() {
         let schedules: Vec<TaskSchedule> = Vec::from([
-            TaskSchedule::RepeatByCron("*/2 * * * * *".try_into().unwrap()),
-            TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap()),
+            TaskSchedule::RepeatByCron("*/2 * * * * *".try_into().unwrap(), CronOpts::default()),
+            TaskSchedule::RepeatByCron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
         ]);
         let durations = [Duration::from_millis(1200), Duration::from_millis(3500)];
         let scheduler = Scheduler::new(

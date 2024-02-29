@@ -1,5 +1,5 @@
-//! Module for first essential structure, [`Scheduler`], which is a heart of the `SACS`.
-//! This is an entry point to schedule and control on [`Tasks`](Task) and whole jobs runtime.
+//! [`Scheduler`] is the most essential structure of `SACS`, it's heart.
+//! This is an entry point to schedule tasks and control on tasks and on whole jobs runtime.
 //!
 //! All other module's content works for [`Scheduler`].
 use crate::{

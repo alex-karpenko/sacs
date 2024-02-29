@@ -1,4 +1,4 @@
-//! `Task` object represents single job with schedule. Use it to create workload of different types and post it to `Scheduler`.
+//! [`Task`] object represents single job with schedule. Use it to create workload of different types and post it to `Scheduler`.
 //!
 //! Module contains everything related to [`Task`], it's [`TaskSchedule`] and [`state`](TaskStatus).
 //!

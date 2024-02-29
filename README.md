@@ -55,6 +55,11 @@ async fn main() -> Result<()> {
 }
 ```
 
+## TODO
+
+- [ ] More examples.
+- [ ] Tracing.
+
 ## License
 
 This project is licensed under the [MIT license](LICENSE).

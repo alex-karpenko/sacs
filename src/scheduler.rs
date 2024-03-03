@@ -439,10 +439,10 @@ impl Scheduler {
                                 tasks.insert(task_id, task);
                             },
                             ChangeStateEvent::DropTask(id, opts) => {
-                                let tasks = tasks.read().await;
+                                let mut tasks = tasks.write().await;
                                 let task = tasks.get(&id);
                                 if let Some(task) = task {
-                                    let event_id = id.into();
+                                    let event_id = id.clone().into();
                                     queue.pop(&event_id).await?;
                                     match opts {
                                         CancelOpts::Ignore => {},
@@ -452,6 +452,7 @@ impl Scheduler {
                                             }
                                         },
                                     }
+                                    tasks.remove(&id);
                                 }
                             }
                         }

@@ -31,7 +31,7 @@ pub trait TaskScheduler {
     /// Posts new [`Task`] to the `Scheduler`.
     async fn add(&self, task: Task) -> Result<TaskId>;
     /// Cancels existing [`Task`] with respect to [`CancelOpts`].
-    async fn drop(&self, id: TaskId, opts: CancelOpts) -> Result<()>;
+    async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()>;
     /// Returns current status of the [`Task`] and removes task from the scheduler if it's finished.
     async fn status(&self, id: &TaskId) -> Result<TaskStatus>;
     /// Shuts down the scheduler with respect to [`ShutdownOpts`].
@@ -44,7 +44,7 @@ pub trait TaskScheduler {
     /// Posts new [`Task`] to the `Scheduler`.
     fn add(&self, task: Task) -> impl std::future::Future<Output = Result<TaskId>> + Send;
     /// Cancels existing [`Task`] with respect to [`CancelOpts`].
-    fn drop(
+    fn cancel(
         &self,
         id: TaskId,
         opts: CancelOpts,
@@ -556,7 +556,7 @@ impl TaskScheduler for Scheduler {
     /// task can be killed or left to continue working up to finish.
     ///
     /// Returns [`Error::IncorrectTaskId`] if task is not scheduled or cleaned by garbage collector.
-    async fn drop(&self, id: TaskId, opts: CancelOpts) -> Result<()> {
+    async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()> {
         self.send_event(ChangeStateEvent::DropTask(id, opts)).await
     }
 

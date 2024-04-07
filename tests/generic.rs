@@ -57,7 +57,7 @@ async fn single_worker(worker_type: WorkerType) {
         TaskSchedule::Once,
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
         TaskSchedule::Interval(Duration::from_secs(2)),
-        TaskSchedule::IntervalDelayed(Duration::from_secs(3)),
+        TaskSchedule::IntervalDelayed(Duration::from_secs(3), Duration::from_secs(3)),
         TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [
@@ -85,7 +85,7 @@ async fn four_workers(worker_type: WorkerType) {
         TaskSchedule::Once,
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
         TaskSchedule::Interval(Duration::from_secs(2)),
-        TaskSchedule::IntervalDelayed(Duration::from_secs(3)),
+        TaskSchedule::IntervalDelayed(Duration::from_secs(3), Duration::from_secs(3)),
         TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [
@@ -113,7 +113,7 @@ async fn unlimited_workers(worker_type: WorkerType) {
         TaskSchedule::Once,
         TaskSchedule::OnceDelayed(Duration::from_secs(1)),
         TaskSchedule::Interval(Duration::from_secs(2)),
-        TaskSchedule::IntervalDelayed(Duration::from_secs(3)),
+        TaskSchedule::IntervalDelayed(Duration::from_secs(3), Duration::from_secs(3)),
         TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
     ]);
     let durations = [

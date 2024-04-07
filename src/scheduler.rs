@@ -616,7 +616,7 @@ impl TaskScheduler for Scheduler {
 mod test {
     use super::*;
     use crate::task::{CronOpts, TaskSchedule};
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
     use uuid::Uuid;
 
     async fn basic_test_suite(

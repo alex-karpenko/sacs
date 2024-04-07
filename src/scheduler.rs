@@ -397,7 +397,7 @@ impl Scheduler {
                 // Prepare GC task
                 let tasks = tasks.clone();
                 let task = Task::new(
-                    crate::task::TaskSchedule::IntervalDelayed(interval),
+                    crate::task::TaskSchedule::IntervalDelayed(interval, interval),
                     move |id| {
                         let tasks = tasks.clone();
                         Box::pin(async move {
@@ -616,7 +616,7 @@ impl TaskScheduler for Scheduler {
 mod test {
     use super::*;
     use crate::task::{CronOpts, TaskSchedule};
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
     use uuid::Uuid;
 
     async fn basic_test_suite(
@@ -1021,8 +1021,8 @@ mod test {
         let schedules: Vec<TaskSchedule> = Vec::from([
             TaskSchedule::Interval(Duration::from_secs(3)),
             TaskSchedule::Interval(Duration::from_secs(1)),
-            TaskSchedule::IntervalDelayed(Duration::from_millis(2100)),
-            TaskSchedule::IntervalDelayed(Duration::from_millis(5900)),
+            TaskSchedule::IntervalDelayed(Duration::from_millis(2100), Duration::from_millis(2100)),
+            TaskSchedule::IntervalDelayed(Duration::from_millis(5900), Duration::from_millis(5900)),
         ]);
         let durations = [
             Duration::from_millis(900),

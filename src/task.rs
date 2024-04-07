@@ -142,8 +142,7 @@ impl Display for TaskId {
 /// - `OnceDelayed`: The same as `Once` but it starts after specified delay.
 /// - `Interval`: this is the simplest repeatable task, scheduler starts it immediately after adding, waits for finish
 /// and starts next instance after specified interval. So there can be single working job only with this type of schedule.
-/// - `IntervalDelayed`: it's behavior is similar to `Interval` but scheduler starts first job with delay equal to
-/// it's repeat interval.
+/// - `IntervalDelayed`: it's behavior is similar to `Interval` but scheduler starts first job with some specified delay.
 /// - `Cron`: the most flexible schedule type which use well-known cron [`expressions`](CronSchedule) to define time to run
 /// and [`CronOpts`] parameter which defines behavior of task right after adding to scheduler (start first job immediately or
 /// strictly according to the schedule) and allows or restricts concurrent running of jobs.
@@ -157,7 +156,7 @@ impl Display for TaskId {
 /// let once = TaskSchedule::Once;
 /// let once_after_5m = TaskSchedule::OnceDelayed(Duration::from_secs(5 * 60));
 /// let interval_5s = TaskSchedule::Interval(Duration::from_secs(5));
-/// let interval_after_15s = TaskSchedule::IntervalDelayed(Duration::from_secs(15));
+/// let interval_after_15s = TaskSchedule::IntervalDelayed(Duration::from_secs(15), Duration::from_secs(5));
 ///
 /// // Every every workday, every morning, every 15 minutes.
 /// // Run next job even if previous job is still running.
@@ -177,8 +176,8 @@ pub enum TaskSchedule {
     OnceDelayed(Duration),
     /// Starts first job immediately and after finishing of previous job repeats it every specified interval.
     Interval(Duration),
-    /// Starts first job with delay of specified interval and after finishing of previous job repeats it every specified interval.
-    IntervalDelayed(Duration),
+    /// Starts first job with specified delay and after finishing of first job repeats it every specified interval.
+    IntervalDelayed(Duration, Duration),
     /// Runs job(s) repeatedly according to [`cron schedule`](CronSchedule) with respect to [`options`](CronOpts).
     /// See examples above and documentation of [`CronSchedule`] and [`CronOpts`] for details.
     Cron(CronSchedule, CronOpts),
@@ -190,8 +189,8 @@ impl TaskSchedule {
             TaskSchedule::Once => SystemTime::now(),
             TaskSchedule::OnceDelayed(delay) => SystemTime::now().checked_add(*delay).unwrap(),
             TaskSchedule::Interval(_interval) => SystemTime::now(),
-            TaskSchedule::IntervalDelayed(interval) => {
-                SystemTime::now().checked_add(*interval).unwrap()
+            TaskSchedule::IntervalDelayed(_interval, delay) => {
+                SystemTime::now().checked_add(*delay).unwrap()
             }
             TaskSchedule::Cron(schedule, opts) => {
                 if opts.at_start {
@@ -215,7 +214,7 @@ impl TaskSchedule {
             TaskSchedule::Once => None,
             TaskSchedule::OnceDelayed(_) => None,
             TaskSchedule::Interval(_) => None,
-            TaskSchedule::IntervalDelayed(_) => None,
+            TaskSchedule::IntervalDelayed(_, _) => None,
         }
     }
     pub(crate) fn after_finish_run_time(&self) -> Option<SystemTime> {
@@ -223,7 +222,7 @@ impl TaskSchedule {
             TaskSchedule::Interval(interval) => {
                 Some(SystemTime::now().checked_add(*interval).unwrap())
             }
-            TaskSchedule::IntervalDelayed(interval) => {
+            TaskSchedule::IntervalDelayed(interval, _delay) => {
                 Some(SystemTime::now().checked_add(*interval).unwrap())
             }
             TaskSchedule::Once => None,

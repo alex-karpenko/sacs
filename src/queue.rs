@@ -25,6 +25,7 @@ pub trait EventTimeQueue {
     async fn next(&self) -> Result<Event>;
     /// Blocks execution until next event time or timeout exceeded.
     /// Returns Option with Result with event and remove it from queue, or None if timeout.
+    #[allow(dead_code)]
     async fn try_next(&self, timeout: Duration) -> Option<Result<Event>> {
         select! {
             biased;
@@ -36,11 +37,13 @@ pub trait EventTimeQueue {
     /// Insert event into queue at event's time position.
     async fn insert(&self, event: Event) -> Result<()>;
     /// Insert event into queue at current time.
+    #[allow(dead_code)]
     async fn push(&self, id: EventId) -> Result<()> {
         self.insert(Event::with_id(id)).await
     }
 
     /// Remove event from the queue at it's time position.
+    #[allow(dead_code)]
     async fn remove(&self, event: &Event) -> Result<()>;
     /// Removes all event's instances at all times.
     async fn pop(&self, id: &EventId) -> Result<Vec<SystemTime>>;

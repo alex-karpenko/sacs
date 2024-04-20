@@ -97,10 +97,11 @@ pub trait TaskScheduler {
 /// }
 /// ```
 ///
-/// Use separate `MultiThread` `Tokio` runtime:
+/// Use separate `MultiThread` `Tokio` runtime, collect finished tasks immediately:
 /// ```rust
 /// use sacs::{
-///     scheduler::{RuntimeThreads, Scheduler, SchedulerBuilder, ShutdownOpts, TaskScheduler, WorkerType},
+///     scheduler::{RuntimeThreads, Scheduler, SchedulerBuilder, GarbageCollector,
+///                 ShutdownOpts, TaskScheduler, WorkerType},
 ///     Result,
 /// };
 ///
@@ -108,6 +109,7 @@ pub trait TaskScheduler {
 /// async fn multi_thread_scheduler() -> Result<()> {
 ///     let scheduler = SchedulerBuilder::new()
 ///         .worker_type(WorkerType::MultiThread(RuntimeThreads::CpuCores))
+///         .garbage_collector(GarbageCollector::Immediate)
 ///         .build();
 ///     // ...
 ///     scheduler.shutdown(ShutdownOpts::WaitForFinish).await
@@ -229,7 +231,7 @@ pub enum GarbageCollector {
     /// Don't collect garbage (default).
     #[default]
     Disabled,
-    /// Don't preserve finished tasks status
+    /// Don't preserve finished tasks status at all (clean status right after finishing).
     Immediate,
     /// Run garbage collector every `interval` time and clean up tasks which have been finished more than `expire_after` time ago.
     Periodic {
@@ -239,14 +241,6 @@ pub enum GarbageCollector {
 }
 
 impl GarbageCollector {
-    /// Helper constructor to create garbage collector config.
-    pub fn periodic(expire_after: Duration, interval: Duration) -> Self {
-        Self::Periodic {
-            expire_after,
-            interval,
-        }
-    }
-
     /// Helper constructor to disable garbage collector.
     pub fn disabled() -> Self {
         Self::Disabled
@@ -255,6 +249,14 @@ impl GarbageCollector {
     /// Helper constructor to crete immediate garbage collector.
     pub fn immediate() -> Self {
         Self::Immediate
+    }
+
+    /// Helper constructor to create garbage collector config.
+    pub fn periodic(expire_after: Duration, interval: Duration) -> Self {
+        Self::Periodic {
+            expire_after,
+            interval,
+        }
     }
 }
 
@@ -1150,23 +1152,32 @@ mod test {
                 tokio::time::sleep(Duration::from_secs(2)).await;
             })
         });
-        // Once work for 4s
+        // Once work for 2s
         let task_2 = Task::new(TaskSchedule::Once, |_id| {
             Box::pin(async move {
                 tokio::time::sleep(Duration::from_secs(2)).await;
             })
         });
+        // Once work for 3s
+        let task_3 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            })
+        });
 
         let id_1 = scheduler.add(task_1).await.unwrap();
         let id_2 = scheduler.add(task_2).await.unwrap();
+        let id_3 = scheduler.add(task_3).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(2500)).await;
         assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
         assert!(scheduler.status(&id_2).await.is_err());
+        assert_eq!(scheduler.status(&id_3).await.unwrap(), TaskStatus::Running);
 
         tokio::time::sleep(Duration::from_millis(1000)).await;
         assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
         assert!(scheduler.status(&id_2).await.is_err());
+        assert!(scheduler.status(&id_3).await.is_err());
 
         scheduler
             .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))

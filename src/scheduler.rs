@@ -530,7 +530,7 @@ impl Scheduler {
                             // Remove task from state if GC is Immediate
                             if is_finished && garbage_collector == GarbageCollector::Immediate {
                                 debug!("work: immediate GC, remove finished task {task_id}");
-                                tasks.remove(&task_id);
+                                tasks.remove(task_id);
                             }
                         }
                     } else {

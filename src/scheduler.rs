@@ -131,7 +131,7 @@ pub trait TaskScheduler {
 ///     let scheduler = SchedulerBuilder::new()
 ///         .worker_type(WorkerType::MultiThread(RuntimeThreads::Limited(4)))
 ///         .parallelism(WorkerParallelism::Unlimited)
-///         .garbage_collector(GarbageCollector::enabled(
+///         .garbage_collector(GarbageCollector::periodic(
 ///             Duration::from_secs(12 * 60 * 60), // expire after
 ///             Duration::from_secs(15 * 60),      // interval
 ///         ))
@@ -224,13 +224,15 @@ pub enum ShutdownOpts {
 }
 
 /// Define parameters of orphaned task's garbage collector.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub enum GarbageCollector {
     /// Don't collect garbage (default).
     #[default]
     Disabled,
+    /// Don't preserve finished tasks status
+    Immediate,
     /// Run garbage collector every `interval` time and clean up tasks which have been finished more than `expire_after` time ago.
-    Enabled {
+    Periodic {
         expire_after: Duration,
         interval: Duration,
     },
@@ -238,8 +240,8 @@ pub enum GarbageCollector {
 
 impl GarbageCollector {
     /// Helper constructor to create garbage collector config.
-    pub fn enabled(expire_after: Duration, interval: Duration) -> Self {
-        Self::Enabled {
+    pub fn periodic(expire_after: Duration, interval: Duration) -> Self {
+        Self::Periodic {
             expire_after,
             interval,
         }
@@ -248,6 +250,11 @@ impl GarbageCollector {
     /// Helper constructor to disable garbage collector.
     pub fn disabled() -> Self {
         Self::Disabled
+    }
+
+    /// Helper constructor to crete immediate garbage collector.
+    pub fn immediate() -> Self {
+        Self::Immediate
     }
 }
 
@@ -295,7 +302,7 @@ impl GarbageCollector {
 ///     let scheduler = SchedulerBuilder::new()
 ///         .worker_type(WorkerType::MultiThread(RuntimeThreads::Limited(4)))
 ///         .parallelism(WorkerParallelism::Unlimited)
-///         .garbage_collector(GarbageCollector::Enabled {
+///         .garbage_collector(GarbageCollector::Periodic {
 ///             expire_after: Duration::from_secs(12 * 60 * 60), // 12 hours
 ///             interval: Duration::from_secs(15 * 60),  // 15 minutes
 ///         })
@@ -390,7 +397,8 @@ impl Scheduler {
 
         match garbage_collector {
             GarbageCollector::Disabled => {}
-            GarbageCollector::Enabled {
+            GarbageCollector::Immediate => {}
+            GarbageCollector::Periodic {
                 expire_after,
                 interval,
             } => {
@@ -492,27 +500,37 @@ impl Scheduler {
                         let job_state = executor.state(&job_id).await?;
                         let task_id = jobs.get(&job_id);
                         if let Some(task_id) = task_id {
-                            let task = tasks.get_mut(task_id);
-                            if let Some(task) = task {
-                                debug!("work: job status changed={:?}", job_state);
-                                let mut at = None;
-                                match job_state {
-                                    JobState::Running => { task.state.started(job_id); },
-                                    JobState::Completed => {
-                                        task.state.completed(&job_id);
-                                        at = task.schedule.after_finish_run_time();
-                                    },
-                                    JobState::Cancelled => {
-                                        task.state.cancelled(&job_id);
-                                        at = task.schedule.after_finish_run_time();
-                                    },
-                                    _ => {},
-                                };
-                                if let Some(at) = at {
-                                    let event_id = task.id.clone().into();
-                                    queue.insert(Event::new(event_id, at)).await?;
-                                    task.state.enqueued();
+                            let is_finished = {
+                                let task = tasks.get_mut(task_id);
+                                if let Some(task) = task {
+                                    debug!("work: job status changed={:?}", job_state);
+                                    let mut at = None;
+                                    match job_state {
+                                        JobState::Running => { task.state.started(job_id); },
+                                        JobState::Completed => {
+                                            task.state.completed(&job_id);
+                                            at = task.schedule.after_finish_run_time();
+                                        },
+                                        JobState::Cancelled => {
+                                            task.state.cancelled(&job_id);
+                                            at = task.schedule.after_finish_run_time();
+                                        },
+                                        _ => {},
+                                    };
+                                    if let Some(at) = at {
+                                        let event_id = task.id.clone().into();
+                                        queue.insert(Event::new(event_id, at)).await?;
+                                        task.state.enqueued();
+                                    }
+                                    task.state.finished()
+                                } else {
+                                    false
                                 }
+                            };
+                            // Remove task from state if GC is Immediate
+                            if is_finished && garbage_collector == GarbageCollector::Immediate {
+                                debug!("work: immediate GC, remove finished task {task_id}");
+                                tasks.remove(&task_id);
                             }
                         }
                     } else {
@@ -1068,9 +1086,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn garbage_collector() {
+    async fn garbage_collector_periodic() {
         let scheduler = SchedulerBuilder::new()
-            .garbage_collector(GarbageCollector::enabled(
+            .garbage_collector(GarbageCollector::periodic(
                 Duration::from_millis(2500),
                 Duration::from_millis(500),
             ))
@@ -1113,6 +1131,42 @@ mod test {
         assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
         assert!(scheduler.status(&id_2).await.is_err());
         assert_eq!(scheduler.status(&id_3).await.unwrap(), TaskStatus::Finished);
+
+        scheduler
+            .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn garbage_collector_immediate() {
+        let scheduler = SchedulerBuilder::new()
+            .garbage_collector(GarbageCollector::immediate())
+            .build();
+
+        // Every 100ms work for 2s
+        let task_1 = Task::new(TaskSchedule::Interval(Duration::from_millis(100)), |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        });
+        // Once work for 4s
+        let task_2 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        });
+
+        let id_1 = scheduler.add(task_1).await.unwrap();
+        let id_2 = scheduler.add(task_2).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
+        assert!(scheduler.status(&id_2).await.is_err());
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
+        assert!(scheduler.status(&id_2).await.is_err());
 
         scheduler
             .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))

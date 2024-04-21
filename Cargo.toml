@@ -10,22 +10,37 @@ name = "sacs"
 readme = "README.md"
 repository = "https://github.com/alex-karpenko/sacs"
 version = "0.4.0"
-
-exclude = [".github/**"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+exclude = [
+    ".github/**",
+    ".vscode/**",
+    "TODO.md",
+    "Cargo.lock",
+    "target/**",
+    ".gitignore",
+]
 
 [dependencies]
-chrono = {version = "0.4.38", default-features = false, features = ["std"]}
+chrono = { version = "0.4.38", default-features = false, features = ["std"] }
 cron = "0.12.1"
-futures = {version = "0.3.30", default-features = false, features = ["alloc", "std", "async-await"]}
-thiserror = "1.0.58"
-tokio = {version = "1.37.0", features = ["time", "macros", "sync", "signal", "rt", "rt-multi-thread"]}
-tracing = {version = "0.1.40", default-features = false, features = ["std"]}
-uuid = {version = "1.8.0", features = ["fast-rng", "v4"]}
+futures = { version = "0.3.30", default-features = false, features = [
+    "alloc",
+    "std",
+    "async-await",
+] }
+thiserror = "1.0.59"
+tokio = { version = "1.37.0", features = [
+    "time",
+    "macros",
+    "sync",
+    "signal",
+    "rt",
+    "rt-multi-thread",
+] }
+tracing = { version = "0.1.40", default-features = false, features = ["std"] }
+uuid = { version = "1.8.0", features = ["fast-rng", "v4"] }
 
 [features]
 async-trait = []
 
 [dev-dependencies]
-tracing-subscriber = {version = "0.3.18"}
+tracing-subscriber = { version = "0.3.18" }

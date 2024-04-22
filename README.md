@@ -2,6 +2,16 @@
 
 `SACS` is easy to use, lightweight scheduler and executor of repeatable async tasks for `Tokio` runtime.
 
+<p>
+<a href="https://github.com/alex-karpenko/sacs/actions/workflows/ci.yaml" rel="nofollow"><img src="https://img.shields.io/github/actions/workflow/status/alex-karpenko/sacs/ci.yaml?label=ci" alt="CI status"></a>
+<a href="https://github.com/alex-karpenko/sacs/actions/workflows/audit.yaml" rel="nofollow"><img src="https://img.shields.io/github/actions/workflow/status/alex-karpenko/sacs/audit.yaml?label=audit" alt="Audit status"></a>
+<a href="https://github.com/alex-karpenko/sacs/actions/workflows/publish.yaml" rel="nofollow"><img src="https://img.shields.io/github/actions/workflow/status/alex-karpenko/sacs/publish.yaml?label=publish" alt="Crates.io publishing status"></a>
+<a href="https://crates.io/crates/sacs" rel="nofollow"><img src="https://img.shields.io/crates/v/sacs" alt="Version at Crates.io"></a>
+<a href="https://docs.rs/sacs" rel="nofollow"><img src="https://img.shields.io/docsrs/sacs" alt="docs.rs status"></a>
+<a href="https://github.com/alex-karpenko/sacs/blob/HEAD/LICENSE" rel="nofollow"><img src="https://img.shields.io/crates/l/sacs" alt="License"></a>
+</p>
+<!-- ![Crates.io MSRV](https://img.shields.io/crates/msrv/sacs) -->
+
 ## Features
 
 - Runs tasks with different types of schedule: once, with delay, by interval, with cron schedule.

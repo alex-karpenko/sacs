@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub struct JobId {
-    id: Uuid,
+    pub id: Uuid,
 }
 
 impl JobId {

@@ -58,6 +58,38 @@ impl Task {
         }
     }
 
+    /// Create a new Task with a specified schedule and job function with the specified uuid.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use sacs::task::{CronOpts, Task, TaskSchedule};
+    /// use std::time::Duration;
+    /// use uuid::Uuid;
+    ///
+    /// let schedule = TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default());
+    /// let task = Task::new_with_uuid(schedule, |id| {
+    ///     Box::pin(async move {
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(1)).await;
+    ///         // ...
+    ///         println!("Job {id} finished.");
+    ///         })
+    ///     }, Uuid::new_v4());
+    /// ```
+    pub fn new_with_uuid<T>(schedule: TaskSchedule, job: T, uuid: Uuid) -> Self
+        where
+            T: 'static,
+            T: FnMut(JobId) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+    {
+        Self {
+            id: TaskId::new_with_uuid(uuid),
+            job: Arc::new(RwLock::new(Box::new(job))),
+            schedule,
+            state: TaskState::default(),
+        }
+    }
+
     /// Returns task's [`TaskId`], it can be used to `drop` task or to get it's `status`.
     pub fn id(&self) -> TaskId {
         self.id.clone()
@@ -94,6 +126,10 @@ impl TaskId {
     /// Constructs new unique `TaskId`.
     pub fn new() -> Self {
         Self { id: Uuid::new_v4() }
+    }
+    /// Returns the `TaskId` with the entered uuid.
+    pub fn new_with_uuid(uuid: Uuid) -> Self {
+        Self { id: uuid }
     }
 }
 impl Default for TaskId {

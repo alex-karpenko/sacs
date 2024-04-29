@@ -63,27 +63,36 @@ impl Task {
     /// # Examples
     ///
     /// ```rust
-    /// use sacs::task::{CronOpts, Task, TaskSchedule};
+    /// use sacs::task::{CronOpts, Task, TaskId, TaskSchedule};
     /// use std::time::Duration;
     /// use uuid::Uuid;
     ///
     /// let schedule = TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default());
-    /// let task = Task::new_with_uuid(schedule, |id| {
+    /// let task1 = Task::new_with_id(schedule.clone(), |id| {
     ///     Box::pin(async move {
     ///         // Actual async workload here
     ///         tokio::time::sleep(Duration::from_secs(1)).await;
     ///         // ...
     ///         println!("Job {id} finished.");
     ///         })
-    ///     }, Uuid::new_v4());
+    ///     }, Uuid::new_v4().into());
+    ///
+    /// let task2 = Task::new_with_id(schedule, |id| {
+    ///     Box::pin(async move {
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(1)).await;
+    ///         // ...
+    ///         println!("Job {id} finished.");
+    ///         })
+    ///     }, TaskId::from(Uuid::new_v4()));
     /// ```
-    pub fn new_with_uuid<T>(schedule: TaskSchedule, job: T, uuid: Uuid) -> Self
-        where
-            T: 'static,
-            T: FnMut(JobId) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+    pub fn new_with_id<T>(schedule: TaskSchedule, job: T, id: TaskId) -> Self
+where
+    T: 'static,
+    T: FnMut(JobId) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
     {
         Self {
-            id: TaskId::new_with_uuid(uuid),
+            id,
             job: Arc::new(RwLock::new(Box::new(job))),
             schedule,
             state: TaskState::default(),
@@ -126,10 +135,6 @@ impl TaskId {
     /// Constructs new unique `TaskId`.
     pub fn new() -> Self {
         Self { id: Uuid::new_v4() }
-    }
-    /// Returns the `TaskId` with the entered uuid.
-    pub fn new_with_uuid(uuid: Uuid) -> Self {
-        Self { id: uuid }
     }
 }
 impl Default for TaskId {

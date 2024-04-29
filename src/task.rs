@@ -58,10 +58,10 @@ impl Task {
         }
     }
 
-    /// Create a new Task with a specified schedule, job function TaskId.
+    /// Create a new `Task` with a specified schedule, job function and `TaskId`.
     ///
-    /// This method is useful if you need to know T`askId`` before task scheduled,
-    /// or need to use TaskId within job context: for particular task it's TaskId is constant value,
+    /// This method is useful if you need to know `TaskId` before task scheduled,
+    /// or need to use `TaskId` within job context: for particular task it's TaskId is constant value,
     /// but JobId varies for each task run.
     ///
     /// # Examples

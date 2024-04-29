@@ -58,6 +58,56 @@ impl Task {
         }
     }
 
+    /// Create a new `Task` with a specified schedule, job function and `TaskId`.
+    ///
+    /// This method is useful if you need to know `TaskId` before task scheduled,
+    /// or need to use `TaskId` within job context: for particular task it's TaskId is constant value,
+    /// but JobId varies for each task run.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use sacs::task::{CronOpts, Task, TaskId, TaskSchedule};
+    /// use std::time::Duration;
+    /// use uuid::Uuid;
+    ///
+    /// let schedule = TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default());
+    /// let task1_id = TaskId::from(Uuid::new_v4());
+    /// let task_id = task1_id.clone();
+    ///
+    /// let task1 = Task::new_with_id(schedule.clone(), move |id| {
+    ///     let task_id = task_id.clone();
+    ///     Box::pin(async move {
+    ///         println!("TaskId={task_id}.");
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(1)).await;
+    ///         // ...
+    ///         println!("Job {id} finished.");
+    ///         })
+    ///     }, task1_id);
+    ///
+    /// let task2 = Task::new_with_id(schedule, |id| {
+    ///     Box::pin(async move {
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(1)).await;
+    ///         // ...
+    ///         println!("Job {id} finished.");
+    ///         })
+    ///     }, Uuid::new_v4().into());
+    /// ```
+    pub fn new_with_id<T>(schedule: TaskSchedule, job: T, id: TaskId) -> Self
+    where
+        T: 'static,
+        T: FnMut(JobId) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
+    {
+        Self {
+            id,
+            job: Arc::new(RwLock::new(Box::new(job))),
+            schedule,
+            state: TaskState::default(),
+        }
+    }
+
     /// Returns task's [`TaskId`], it can be used to `drop` task or to get it's `status`.
     pub fn id(&self) -> TaskId {
         self.id.clone()

@@ -567,13 +567,13 @@ impl TaskScheduler for Scheduler {
     ///
     /// Right after that task will be staring to execute according to it's schedule.
     ///
-    /// Returns [`TaskId`] of the scheduled task or [`Error::IncorrectTaskId`] if task with the same `TaskId` is already present,
+    /// Returns [`TaskId`] of the scheduled task or [`Error::DuplicatedTaskId`] if task with the same `TaskId` is already present,
     /// even if it's finished but not removed by getting it's status or by garbage collector.
     async fn add(&self, task: Task) -> Result<TaskId> {
         let id = task.id();
         yield_now().await; // to avoid scheduling several tasks within single async scheduler cycle
         if self.tasks.read().await.get(&id).is_some() {
-            Err(Error::IncorrectTaskId(id))
+            Err(Error::DuplicatedTaskId(id))
         } else {
             self.send_event(ChangeStateEvent::EnqueueTask(task)).await?;
             Ok(id)
@@ -1216,7 +1216,9 @@ mod test {
         assert!(id2.is_err());
         let err = id2.err().unwrap();
         match err {
-            Error::IncorrectTaskId(_) => {}
+            Error::DuplicatedTaskId(id) => {
+                assert_eq!(id, TaskId::from(task_id))
+            }
             _ => unreachable!("Incorrect error type or TaskId"),
         }
 

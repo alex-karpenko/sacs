@@ -1201,26 +1201,20 @@ mod test {
             .build();
 
         // Every 100ms work for 2s
-        let task_1 = Task::new_with_id(
-            TaskSchedule::Interval(Duration::from_millis(100)),
-            |_id| {
-                Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                })
-            },
-            task_id.into(),
-        );
+        let task_1 = Task::new(TaskSchedule::Interval(Duration::from_millis(100)), |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        })
+        .with_id(task_id);
 
         // Once but with the same TaskId
-        let task_2 = Task::new_with_id(
-            TaskSchedule::Once,
-            |_id| {
-                Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                })
-            },
-            task_id.into(),
-        );
+        let task_2 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        })
+        .with_id(task_id);
 
         let _id1 = scheduler.add(task_1).await.unwrap();
         let id2 = scheduler.add(task_2).await;

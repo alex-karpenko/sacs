@@ -19,6 +19,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 /// `Task` represents single job with it's schedule, attributes and state.
+#[derive(Clone)]
 pub struct Task {
     pub(crate) id: TaskId,
     pub(crate) job: AsyncJobBoxed,
@@ -27,7 +28,7 @@ pub struct Task {
 }
 
 impl Task {
-    /// Creates new Task with specified schedule and job function.
+    /// Creates new Task with specified schedule, job function and default [`TaskId`].
     ///
     /// # Examples
     ///
@@ -58,11 +59,111 @@ impl Task {
         }
     }
 
-    /// Create a new `Task` with a specified schedule, job function and `TaskId`.
+    /// Set explicit [`TaskId`] to the existing [`Task`].
+    /// This method is useful if you need to know [`TaskId`] before task was scheduled.
     ///
-    /// This method is useful if you need to know `TaskId` before task scheduled,
-    /// or need to use `TaskId` within job context: for particular task it's TaskId is constant value,
+    /// # Note:
+    /// **_If you provide explicit [`TaskId`] value, your responsibility is to ensure uniqueness of the [`TaskId`]
+    /// within instance of `Scheduler`._**
+    ///
+    /// This method consumes `Task` instance and returns the same instance with specified `Id`. Since [`Task`] can be cloned
+    /// this method can be used to create several identical tasks with different `TaskId`s.
+    ///
+    /// # Examples:
+    ///
+    /// ```rust
+    /// use sacs::task::{CronOpts, Task, TaskId, TaskSchedule};
+    /// use std::time::Duration;
+    /// use uuid::Uuid;
+    ///
+    /// let schedule = TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default());
+    /// let task1_id = Uuid::new_v4();
+    /// let task_id = task1_id.clone();
+    ///
+    /// let task1 = Task::new(schedule.clone(), move |id| {
+    ///     let task_id = task_id.clone();
+    ///     Box::pin(async move {
+    ///         println!("TaskId={task_id}.");
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(1)).await;
+    ///         // ...
+    ///         println!("Job {id} finished.");
+    ///         })
+    ///     }).with_id(task1_id);
+    ///
+    /// let task2 = task1.clone().with_id(Uuid::new_v4());
+    ///
+    /// let task3 = Task::new(schedule, |id| {
+    ///     Box::pin(async move {
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(1)).await;
+    ///         // ...
+    ///         println!("Job {id} finished.");
+    ///         })
+    ///     }).with_id(Uuid::new_v4());
+    /// ```
+    pub fn with_id(self, id: impl Into<TaskId>) -> Self {
+        Self {
+            id: id.into(),
+            ..self
+        }
+    }
+
+    /// Set specific [`TaskSchedule`] to the existing [`Task`].
+    ///
+    /// Method is useful if you need to create new task based on existing (not scheduled yet) [`Task`].
+    ///
+    /// Method consumes `Task` instance and returns the same instance with specified [`TaskSchedule`]. Since [`Task`] can be cloned
+    /// this method can be used to create several identical tasks with different schedules.
+    ///
+    /// Be careful: [`Task::clone()`] doesn't change `TaskId`, so it's your responsibility to ensure uniqueness of task's Id before
+    /// posting it to `Scheduler`. Anyway `Scheduler::add()` method rejects new `Task` if the same (with the same `TaskId`) is already present,
+    /// even if it's finished but not removed by getting it's status or by garbage collector.
+    ///
+    /// # Examples:
+    ///
+    /// ```rust
+    /// use sacs::task::{Task, TaskSchedule};
+    /// use std::time::Duration;
+    /// use uuid::Uuid;
+    ///
+    /// let task1 = Task::new(TaskSchedule::Once, move |id| {
+    ///     Box::pin(async move {
+    ///         println!("Starting job {id}.");
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(1)).await;
+    ///         // ...
+    ///         println!("Job {id} finished.");
+    ///         })
+    ///     });
+    ///
+    /// let task2 = task1.clone()
+    ///         .with_schedule(TaskSchedule::OnceDelayed(Duration::from_secs(5)))
+    ///         .with_id(Uuid::new_v4());
+    ///
+    /// let task3 = task1.clone()
+    ///         .with_schedule(TaskSchedule::IntervalDelayed(
+    ///             Duration::from_secs(2),
+    ///             Duration::from_secs(1),
+    ///         ))
+    ///         .with_id(Uuid::new_v4());
+    /// ```
+    pub fn with_schedule(self, schedule: impl Into<TaskSchedule>) -> Self {
+        Self {
+            schedule: schedule.into(),
+            ..self
+        }
+    }
+
+    /// Create a new [`Task`] with a specified schedule, job function and explicit [`TaskId`].
+    ///
+    /// This method is useful if you need to know [`TaskId`] before task was scheduled.
+    /// Or need to use [`TaskId`] within job context: for particular task it's TaskId is constant value,
     /// but JobId varies for each task run.
+    ///
+    /// # Note:
+    /// **_If you provide explicit [`TaskId`] value, your responsibility is to ensure uniqueness of the [`TaskId`]
+    /// within instance of `Scheduler`._**
     ///
     /// # Examples
     ///
@@ -95,6 +196,7 @@ impl Task {
     ///         })
     ///     }, Uuid::new_v4().into());
     /// ```
+    #[deprecated(since = "0.4.2", note = "please use `with_id` method instead.")]
     pub fn new_with_id<T>(schedule: TaskSchedule, job: T, id: TaskId) -> Self
     where
         T: 'static,
@@ -324,7 +426,7 @@ pub enum TaskStatus {
     Finished,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct TaskState {
     waiting: usize,
     scheduled: usize,

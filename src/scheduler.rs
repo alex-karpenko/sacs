@@ -18,6 +18,7 @@ use std::{
 use tokio::{
     select,
     sync::{mpsc::Sender, RwLock},
+    task::yield_now,
 };
 use tracing::{debug, warn};
 
@@ -566,11 +567,17 @@ impl TaskScheduler for Scheduler {
     ///
     /// Right after that task will be staring to execute according to it's schedule.
     ///
-    /// Returns [`TaskId`] of the scheduled task.
+    /// Returns [`TaskId`] of the scheduled task or [`Error::IncorrectTaskId`] if task with the same `TaskId` is already present,
+    /// even if it's finished but not removed by getting it's status or by garbage collector.
     async fn add(&self, task: Task) -> Result<TaskId> {
         let id = task.id();
-        self.send_event(ChangeStateEvent::EnqueueTask(task)).await?;
-        Ok(id)
+        yield_now().await; // to avoid scheduling several tasks within single async scheduler cycle
+        if self.tasks.read().await.get(&id).is_some() {
+            Err(Error::IncorrectTaskId(id))
+        } else {
+            self.send_event(ChangeStateEvent::EnqueueTask(task)).await?;
+            Ok(id)
+        }
     }
 
     /// Removes [`Task`] with specified [`TaskId`] from the scheduler with respect to [`CancelOpts`]:
@@ -1178,6 +1185,54 @@ mod test {
         assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
         assert!(scheduler.status(&id_2).await.is_err());
         assert!(scheduler.status(&id_3).await.is_err());
+
+        scheduler
+            .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reject_duplicated_task() {
+        let task_id = Uuid::new_v4();
+
+        let scheduler = SchedulerBuilder::new()
+            .garbage_collector(GarbageCollector::immediate())
+            .build();
+
+        // Every 100ms work for 2s
+        let task_1 = Task::new_with_id(
+            TaskSchedule::Interval(Duration::from_millis(100)),
+            |_id| {
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                })
+            },
+            task_id.into(),
+        );
+
+        // Once but with the same TaskId
+        let task_2 = Task::new_with_id(
+            TaskSchedule::Once,
+            |_id| {
+                Box::pin(async move {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                })
+            },
+            task_id.into(),
+        );
+
+        let _id1 = scheduler.add(task_1).await.unwrap();
+        let id2 = scheduler.add(task_2).await;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        assert!(id2.is_err());
+        let err = id2.err().unwrap();
+        match err {
+            Error::IncorrectTaskId(_) => {}
+            _ => unreachable!("Incorrect error type or TaskId"),
+        }
 
         scheduler
             .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))

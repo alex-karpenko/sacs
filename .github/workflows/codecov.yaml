@@ -1,0 +1,52 @@
+name: Continuous integration
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - rel-v*
+      - feat/add-codecov
+  schedule:
+    - cron: "0 8 * * 5"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  codecov:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup for testing
+#          mkdir grcov
+#          curl -sL https://github.com/mozilla/grcov/releases/latest/download/grcov-x86_64-unknown-linux-gnu.tar.bz2 | (cd grcov ; tar jxf -)
+        run: |
+          rustup toolchain add nightly --component llvm-tools-preview
+          rustup override set nightly
+
+      - name: Test
+        env:
+          CI: true
+          RUSTFLAGS: -Cinstrument-coverage
+          LLVM_PROFILE_FILE: sacs-%p-%m.profraw
+        run: |
+          cargo build --verbose
+          cargo test
+
+#      - name: Generate coverage
+#        run: |
+#          grcov/grcov $(find . -name "sacs-*.profraw" -print) \
+#            --branch \
+#            --ignore-not-existing \
+#            --binary-path ./target/debug/ \
+#            -s . \
+#            -t lcov \
+#            --ignore "/*" \
+#            -o lcov.info
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+          plugin: gcov

@@ -1194,7 +1194,7 @@ mod test {
     #[tokio::test]
     async fn reject_duplicated_task() {
         let scheduler = SchedulerBuilder::new()
-            .garbage_collector(GarbageCollector::immediate())
+            .garbage_collector(GarbageCollector::disabled())
             .build();
 
         // Every 100ms work for 2s

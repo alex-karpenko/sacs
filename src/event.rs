@@ -5,36 +5,40 @@ use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub(crate) struct EventId {
-    pub id: Uuid,
+    pub id: String,
 }
 
 impl Default for EventId {
     fn default() -> Self {
-        Self { id: Uuid::new_v4() }
+        Self {
+            id: Uuid::new_v4().into(),
+        }
     }
 }
 
 impl From<Uuid> for EventId {
     fn from(value: Uuid) -> Self {
-        Self { id: value }
+        Self { id: value.into() }
     }
 }
 
 impl From<&Uuid> for EventId {
     fn from(value: &Uuid) -> Self {
-        Self { id: *value }
+        Self {
+            id: value.to_string(),
+        }
     }
 }
 
-impl From<EventId> for Uuid {
+impl From<EventId> for String {
     fn from(value: EventId) -> Self {
         value.id
     }
 }
 
-impl From<&EventId> for Uuid {
+impl From<&EventId> for String {
     fn from(value: &EventId) -> Self {
-        value.id
+        value.id.to_owned()
     }
 }
 
@@ -55,14 +59,17 @@ impl std::fmt::Debug for Event {
 }
 
 impl Event {
-    pub fn new(id: EventId, time: SystemTime) -> Self {
-        Self { id, time }
+    pub fn new(id: impl Into<EventId>, time: SystemTime) -> Self {
+        Self {
+            id: id.into(),
+            time,
+        }
     }
 
     #[allow(dead_code)]
-    pub fn with_id(id: EventId) -> Self {
+    pub fn with_id(id: impl Into<EventId>) -> Self {
         Self {
-            id,
+            id: id.into(),
             time: SystemTime::now(),
         }
     }
@@ -128,5 +135,24 @@ impl From<Event> for SystemTime {
 impl From<&Event> for SystemTime {
     fn from(value: &Event) -> Self {
         value.time
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn type_convertors() {
+        let uuid_id = Uuid::new_v4();
+        let str_id = uuid_id.to_string();
+        let event_id = EventId { id: str_id.clone() };
+
+        assert_eq!(EventId::from(uuid_id), event_id);
+        assert_eq!(EventId::from(&uuid_id), event_id);
+
+        assert_eq!(String::from(&event_id), str_id);
+        assert_eq!(String::from(event_id), str_id);
     }
 }

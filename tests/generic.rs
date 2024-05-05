@@ -1,4 +1,5 @@
 use sacs::{
+    job::JobId,
     scheduler::{
         GarbageCollector, RuntimeThreads, Scheduler, ShutdownOpts, TaskScheduler,
         WorkerParallelism, WorkerType,
@@ -8,7 +9,6 @@ use sacs::{
 };
 use std::{sync::Arc, time::Duration};
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 async fn basic_test_suite(
     scheduler: Scheduler,
@@ -23,7 +23,7 @@ async fn basic_test_suite(
     );
 
     let logs = Arc::new(RwLock::new(Vec::<String>::new()));
-    let jobs = Arc::new(RwLock::new(Vec::<Uuid>::new()));
+    let jobs = Arc::new(RwLock::new(Vec::<JobId>::new()));
 
     for s in 0..schedules.len() {
         let log = logs.clone();
@@ -33,7 +33,7 @@ async fn basic_test_suite(
             let log = log.clone();
             let jobs = jobs.clone();
             Box::pin(async move {
-                jobs.write().await.push(id.clone().into());
+                jobs.write().await.push(id.clone());
                 log.write().await.push(format!("{},start,{id}", s));
                 tokio::time::sleep(task_duration).await;
                 log.write().await.push(format!("{},finish,{id}", s));

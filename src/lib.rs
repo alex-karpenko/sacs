@@ -56,7 +56,7 @@
 
 mod event;
 mod executor;
-mod job;
+pub mod job;
 mod queue;
 pub mod scheduler;
 pub mod task;

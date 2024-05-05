@@ -142,8 +142,11 @@ mod test {
 
         assert_eq!(
             format!("{job_id}"),
-            format!("{}/{}", task_id, job_id.job_id)
+            format!("{}/{}", job_id.task_id, job_id.job_id)
         );
-        assert_eq!(job_id.to_string(), format!("{}/{}", task_id, job_id.job_id));
+        assert_eq!(
+            String::from(job_id.clone()),
+            format!("{}/{}", job_id.task_id, job_id.job_id)
+        );
     }
 }

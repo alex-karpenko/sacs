@@ -60,6 +60,7 @@ impl Task {
     }
 
     /// Set explicit [`TaskId`] to the existing [`Task`].
+    ///
     /// This method is useful if you need to know [`TaskId`] before task was scheduled.
     ///
     /// # Note:
@@ -100,7 +101,7 @@ impl Task {
     ///         // ...
     ///         println!("Job {id} finished.");
     ///         })
-    ///     }).with_id(Uuid::new_v4());
+    ///     }).with_id("This is abstract unique task id");
     /// ```
     pub fn with_id(self, id: impl Into<TaskId>) -> Self {
         Self {
@@ -125,7 +126,6 @@ impl Task {
     /// ```rust
     /// use sacs::task::{Task, TaskSchedule};
     /// use std::time::Duration;
-    /// use uuid::Uuid;
     ///
     /// let task1 = Task::new(TaskSchedule::Once, move |id| {
     ///     Box::pin(async move {
@@ -139,14 +139,14 @@ impl Task {
     ///
     /// let task2 = task1.clone()
     ///         .with_schedule(TaskSchedule::OnceDelayed(Duration::from_secs(5)))
-    ///         .with_id(Uuid::new_v4());
+    ///         .with_id("Execute once with 5s delay");
     ///
     /// let task3 = task1.clone()
     ///         .with_schedule(TaskSchedule::IntervalDelayed(
     ///             Duration::from_secs(2),
     ///             Duration::from_secs(1),
     ///         ))
-    ///         .with_id(Uuid::new_v4());
+    ///         .with_id("Repeats every 2s");
     /// ```
     pub fn with_schedule(self, schedule: impl Into<TaskSchedule>) -> Self {
         Self {
@@ -165,7 +165,7 @@ impl Task {
     /// **_If you provide explicit [`TaskId`] value, your responsibility is to ensure uniqueness of the [`TaskId`]
     /// within instance of `Scheduler`._**
     ///
-    /// # Examples
+    /// # Examples:
     ///
     /// ```rust
     /// use sacs::task::{CronOpts, Task, TaskId, TaskSchedule};
@@ -173,7 +173,7 @@ impl Task {
     /// use uuid::Uuid;
     ///
     /// let schedule = TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default());
-    /// let task1_id = TaskId::from(Uuid::new_v4());
+    /// let task1_id = Uuid::new_v4();
     /// let task_id = task1_id.clone();
     ///
     /// let task1 = Task::new_with_id(schedule.clone(), move |id| {
@@ -185,7 +185,7 @@ impl Task {
     ///         // ...
     ///         println!("Job {id} finished.");
     ///         })
-    ///     }, task1_id);
+    ///     }, task1_id.into());
     ///
     /// let task2 = Task::new_with_id(schedule, |id| {
     ///     Box::pin(async move {
@@ -239,13 +239,15 @@ impl std::fmt::Debug for Task {
 /// Unique identifier of [`Task`] which can be used to address task in `Scheduler`.
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub struct TaskId {
-    pub(crate) id: Uuid,
+    pub(crate) id: String,
 }
 
 impl TaskId {
     /// Constructs new unique `TaskId`.
     pub fn new() -> Self {
-        Self { id: Uuid::new_v4() }
+        Self {
+            id: Uuid::new_v4().into(),
+        }
     }
 }
 impl Default for TaskId {
@@ -254,27 +256,49 @@ impl Default for TaskId {
     }
 }
 
+impl From<&str> for TaskId {
+    fn from(value: &str) -> Self {
+        Self { id: value.into() }
+    }
+}
+
+impl From<String> for TaskId {
+    fn from(value: String) -> Self {
+        Self { id: value }
+    }
+}
+
+impl From<&String> for TaskId {
+    fn from(value: &String) -> Self {
+        Self {
+            id: value.to_owned(),
+        }
+    }
+}
+
 impl From<Uuid> for TaskId {
     fn from(value: Uuid) -> Self {
-        Self { id: value }
+        Self { id: value.into() }
     }
 }
 
 impl From<&Uuid> for TaskId {
     fn from(value: &Uuid) -> Self {
-        Self { id: *value }
+        Self {
+            id: value.to_string(),
+        }
     }
 }
 
-impl From<TaskId> for Uuid {
+impl From<TaskId> for String {
     fn from(value: TaskId) -> Self {
         value.id
     }
 }
 
-impl From<&TaskId> for Uuid {
+impl From<&TaskId> for String {
     fn from(value: &TaskId) -> Self {
-        value.id
+        value.id.to_owned()
     }
 }
 
@@ -672,8 +696,8 @@ mod test {
 
     #[test]
     fn task_state_transition() {
-        let job1 = JobId::new();
-        let job2 = JobId::new();
+        let job1 = JobId::new("task 1 id");
+        let job2 = JobId::new("task 2 id");
 
         let mut state = TaskState::default();
         assert_eq!(state.status(), TaskStatus::New);

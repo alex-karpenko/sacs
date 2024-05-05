@@ -8,6 +8,7 @@ use futures::future::select_all;
 use std::collections::HashMap;
 use tokio::{join, select, sync::mpsc::Sender, task::JoinHandle};
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 const WORKER_CONTROL_CHANNEL_SIZE: usize = 1024;
 
@@ -94,7 +95,7 @@ impl Worker {
         let mut handlers: Vec<JoinHandle<()>> = Vec::new();
 
         // Push single always-pending job to avoid panics on empty select_all
-        let fake_id = JobId::new();
+        let fake_id = JobId::new(Uuid::new_v4());
         let fake_handler =
             tokio::task::spawn(Box::pin(async { futures::future::pending::<()>().await }));
         ids.push(fake_id);

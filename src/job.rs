@@ -1,55 +1,84 @@
-use crate::AsyncJobBoxed;
+//! Contains primitive [`JobId`] which uniquely identifies executing `Task` instance.
+use crate::{task::TaskId, AsyncJobBoxed};
 use std::fmt::Display;
 use uuid::Uuid;
 
+/// `JobId` uniquely identifies running instance of `Task`.
+///
+/// You don't need to construct this object manually:
+/// - `task_id` is provided from `Scheduler` during planned starting of the `Task` instance,
+/// - `job_id` is a created automatically `Uuid`.
+///
+/// Executor creates `JobId` for each running job and provides it to job's closure as a parameter (`id` in the example below).
+///
+/// String representation of the `JobId` is `"{task_id}/{job_id}"`.
+///
+/// Common usage of `JobId` inside task closure is for logging.
+///
+/// # Examples
+///
+/// ```rust
+/// use sacs::task::{Task, TaskSchedule};
+/// use std::time::Duration;
+///
+/// let task = Task::new(TaskSchedule::Once, |id| {
+///     Box::pin(async move {
+///         println!("Starting job, TaskId={}, JobId={}.", id.task_id, id.job_id);
+///         // Actual async workload here
+///         tokio::time::sleep(Duration::from_secs(1)).await;
+///         // ...
+///         println!("Job {id} finished.");
+///         })
+///     });
+/// ```
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub struct JobId {
-    id: Uuid,
+    /// ID of the `Task` which owns this Job, is provided from `Scheduler` during scheduled starting of the `Task` instance.
+    pub task_id: TaskId,
+    /// Unique ID of the running Job within particular `Task`.
+    pub job_id: Uuid,
 }
 
 impl JobId {
-    pub fn new() -> Self {
-        Self { id: Uuid::new_v4() }
+    pub(crate) fn new(task_id: impl Into<TaskId>) -> Self {
+        Self {
+            job_id: Uuid::new_v4(),
+            task_id: task_id.into(),
+        }
     }
 }
 
-impl Default for JobId {
-    fn default() -> Self {
-        Self::new()
+impl From<TaskId> for JobId {
+    fn from(value: TaskId) -> Self {
+        Self {
+            job_id: Uuid::new_v4(),
+            task_id: value,
+        }
     }
 }
 
-impl From<Uuid> for JobId {
-    fn from(value: Uuid) -> Self {
-        Self { id: value }
+impl From<&TaskId> for JobId {
+    fn from(value: &TaskId) -> Self {
+        Self {
+            job_id: Uuid::new_v4(),
+            task_id: value.to_owned(),
+        }
     }
 }
 
-impl From<&Uuid> for JobId {
-    fn from(value: &Uuid) -> Self {
-        Self { id: *value }
-    }
-}
-
-impl From<JobId> for Uuid {
+impl From<JobId> for String {
     fn from(value: JobId) -> Self {
-        value.id
-    }
-}
-
-impl From<&JobId> for Uuid {
-    fn from(value: &JobId) -> Self {
-        value.id
+        format!("{}/{}", value.task_id, value.job_id)
     }
 }
 
 impl Display for JobId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.id)
+        write!(f, "{}/{}", self.task_id, self.job_id)
     }
 }
 
-pub struct Job {
+pub(crate) struct Job {
     id: JobId,
     job: AsyncJobBoxed,
 }
@@ -75,7 +104,7 @@ impl std::fmt::Debug for Job {
 }
 
 #[derive(Debug, Default, PartialEq, Clone)]
-pub enum JobState {
+pub(crate) enum JobState {
     #[default]
     Pending,
     Starting,

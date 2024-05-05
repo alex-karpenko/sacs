@@ -441,7 +441,7 @@ impl Scheduler {
                                 return Ok(())
                             },
                             ChangeStateEvent::EnqueueTask(mut task) => {
-                                let event_id = task.id.clone().into();
+                                let event_id = task.id.clone();
                                 let task_id = task.id.clone();
                                 let at = task.schedule.initial_run_time();
                                 queue.insert(Event::new(event_id, at)).await?;
@@ -478,7 +478,7 @@ impl Scheduler {
                         let task = tasks.get_mut(&event.id.into());
 
                         if let Some(task) = task {
-                            let job_id = JobId::new();
+                            let job_id = JobId::new(task.id());
                             let job = task.job.clone();
                             let job = Job::new(job_id, job);
                             let job_id = executor.enqueue(job).await?;
@@ -486,7 +486,7 @@ impl Scheduler {
                             task.state.scheduled(job_id);
                             let at = task.schedule.after_start_run_time();
                             if let Some(at) = at {
-                                let event_id = task.id.clone().into();
+                                let event_id = task.id.clone();
                                 queue.insert(Event::new(event_id, at)).await?;
                                 task.state.enqueued();
                             }
@@ -521,7 +521,7 @@ impl Scheduler {
                                         _ => {},
                                     };
                                     if let Some(at) = at {
-                                        let event_id = task.id.clone().into();
+                                        let event_id = task.id.clone();
                                         queue.insert(Event::new(event_id, at)).await?;
                                         task.state.enqueued();
                                     }
@@ -644,7 +644,6 @@ mod test {
     use super::*;
     use crate::task::{CronOpts, TaskSchedule};
     use std::time::UNIX_EPOCH;
-    use uuid::Uuid;
 
     async fn basic_test_suite(
         scheduler: Scheduler,
@@ -659,7 +658,7 @@ mod test {
         );
 
         let logs = Arc::new(RwLock::new(Vec::<String>::new()));
-        let jobs = Arc::new(RwLock::new(Vec::<Uuid>::new()));
+        let jobs = Arc::new(RwLock::new(Vec::<JobId>::new()));
 
         for s in 0..schedules.len() {
             let log = logs.clone();
@@ -669,7 +668,7 @@ mod test {
                 let log = log.clone();
                 let jobs = jobs.clone();
                 Box::pin(async move {
-                    jobs.write().await.push(id.clone().into());
+                    jobs.write().await.push(id.clone());
                     log.write().await.push(format!("{},start,{id}", s));
                     tokio::time::sleep(task_duration).await;
                     log.write().await.push(format!("{},finish,{id}", s));
@@ -1194,8 +1193,6 @@ mod test {
 
     #[tokio::test]
     async fn reject_duplicated_task() {
-        let task_id = Uuid::new_v4();
-
         let scheduler = SchedulerBuilder::new()
             .garbage_collector(GarbageCollector::immediate())
             .build();
@@ -1206,15 +1203,10 @@ mod test {
                 tokio::time::sleep(Duration::from_secs(2)).await;
             })
         })
-        .with_id(task_id);
+        .with_id("TASK_ID");
 
-        // Once but with the same TaskId
-        let task_2 = Task::new(TaskSchedule::Once, |_id| {
-            Box::pin(async move {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            })
-        })
-        .with_id(task_id);
+        // Clone with duplicated TaskId
+        let task_2 = task_1.clone();
 
         let _id1 = scheduler.add(task_1).await.unwrap();
         let id2 = scheduler.add(task_2).await;

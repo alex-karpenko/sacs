@@ -1230,7 +1230,7 @@ mod test {
         assert!(id2.is_err());
         let err = id2.err().unwrap();
         match err {
-            Error::IncorrectTaskId(_) => {},
+            Error::IncorrectTaskId(_) => {}
             _ => unreachable!("Incorrect error type or TaskId"),
         }
 

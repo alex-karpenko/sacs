@@ -1,11 +1,10 @@
-name: Code coverage
+name: Code coverage report
 on:
   pull_request:
   push:
     branches:
       - main
       - rel-v*
-      - feat/add-codecov
   schedule:
     - cron: "0 8 * * 5"
 
@@ -39,7 +38,7 @@ jobs:
             --branch \
             --ignore-not-existing \
             --binary-path ./target/debug/ \
-            -s . \
+            -s src \
             -t lcov \
             --ignore "/*" \
             -o lcov.info

@@ -96,6 +96,8 @@ pub enum Error {
     #[error("there's no task with id `{0:?}`")]
     IncorrectTaskId(TaskId),
     /// Invalid Cron expression provided during `Task` creation
+    #[error("there's already scheduled task with id `{0:?}`")]
+    DuplicatedTaskId(TaskId),
     #[error("cron expression is invalid")]
     InvalidCronExpression(#[from] cron::error::Error),
     /// Unable to receive change state event due to closed or errored channel

@@ -1,5 +1,9 @@
 name: Continuous integration
-on: pull_request
+on:
+  pull_request:
+  schedule:
+    - cron: "0 9 * * 5"
+
 env:
   CARGO_TERM_COLOR: always
 

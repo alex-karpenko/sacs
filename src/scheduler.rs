@@ -1217,7 +1217,7 @@ mod test {
         let err = id2.err().unwrap();
         match err {
             Error::DuplicatedTaskId(id) => {
-                assert_eq!(id, TaskId::from(task_id))
+                assert_eq!(id, TaskId::from("TASK_ID"))
             }
             _ => unreachable!("Incorrect error type or TaskId"),
         }

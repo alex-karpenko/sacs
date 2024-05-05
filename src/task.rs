@@ -756,8 +756,15 @@ mod test {
         let uuid_id = Uuid::new_v4();
         let str_id = uuid_id.to_string();
 
-        assert_eq!(TaskId::from(String::from("TASK_ID")).id, String::from("TASK_ID"));
-        assert_eq!(TaskId::from(&String::from("TASK_ID")).id, String::from("TASK_ID"));
+        assert_eq!(
+            TaskId::from(String::from("TASK_ID")).id,
+            String::from("TASK_ID")
+        );
+        assert_eq!(
+            TaskId::from(&String::from("TASK_ID")).id,
+            String::from("TASK_ID")
+        );
+
         assert_eq!(TaskId::from("TASK_ID").id, String::from("TASK_ID"));
 
         assert_eq!(TaskId::from(uuid_id).id, str_id);

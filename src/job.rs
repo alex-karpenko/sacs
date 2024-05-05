@@ -131,4 +131,18 @@ mod test {
         assert!(JobState::Completed.finished());
         assert!(JobState::Cancelled.finished());
     }
+
+    #[test]
+    fn type_convertors() {
+        let task_id = TaskId::from("TASK_ID");
+        let job_id = JobId::from(task_id.clone());
+
+        assert_eq!(JobId::from(task_id.clone()).task_id, task_id);
+        assert_eq!(JobId::from(&task_id).task_id, task_id);
+
+        assert_eq!(
+            format!("{job_id}"),
+            format!("{}/{}", task_id.to_string(), job_id.job_id.to_string())
+        );
+    }
 }

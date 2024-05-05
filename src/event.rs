@@ -137,3 +137,21 @@ impl From<&Event> for SystemTime {
         value.time
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn type_convertors() {
+        let uuid_id = Uuid::new_v4();
+        let str_id = uuid_id.to_string();
+        let event_id = EventId { id: str_id.clone() };
+
+        assert_eq!(EventId::from(uuid_id), event_id);
+        assert_eq!(EventId::from(&uuid_id), event_id);
+
+        assert_eq!(String::from(event_id), str_id);
+    }
+}

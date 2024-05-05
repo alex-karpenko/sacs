@@ -1230,8 +1230,8 @@ mod test {
         assert!(id2.is_err());
         let err = id2.err().unwrap();
         match err {
-            Error::IncorrectTaskId(_) => assert!(true),
-            _ => assert!(false, "Incorrect error type or TaskId"),
+            Error::IncorrectTaskId(_) => {},
+            _ => unreachable!("Incorrect error type or TaskId"),
         }
 
         scheduler

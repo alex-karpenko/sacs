@@ -152,6 +152,7 @@ mod test {
         assert_eq!(EventId::from(uuid_id), event_id);
         assert_eq!(EventId::from(&uuid_id), event_id);
 
+        assert_eq!(String::from(&event_id), str_id);
         assert_eq!(String::from(event_id), str_id);
     }
 }

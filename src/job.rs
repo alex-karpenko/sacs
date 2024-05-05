@@ -144,5 +144,9 @@ mod test {
             format!("{job_id}"),
             format!("{}/{}", task_id.to_string(), job_id.job_id.to_string())
         );
+        assert_eq!(
+            job_id.to_string(),
+            format!("{}/{}", task_id.to_string(), job_id.job_id.to_string())
+        );
     }
 }

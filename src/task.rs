@@ -66,7 +66,7 @@ impl Task {
     /// **_If you provide explicit [`TaskId`] value, your responsibility is to ensure uniqueness of the [`TaskId`]
     /// within instance of `Scheduler`._**
     ///
-    /// This method consumes `Task` instance and returns the same instance with specified `Id`. Since [`Task`] can be cloned
+    /// This method consumes `Task` instance and returns the same instance with specified `Id`. Since [`Task`] is cloneable
     /// this method can be used to create several identical tasks with different `TaskId`s.
     ///
     /// # Examples:
@@ -113,7 +113,7 @@ impl Task {
     ///
     /// Method is useful if you need to create new task based on existing (not scheduled yet) [`Task`].
     ///
-    /// Method consumes `Task` instance and returns the same instance with specified [`TaskSchedule`]. Since [`Task`] can be cloned
+    /// Method consumes `Task` instance and returns the same instance with specified [`TaskSchedule`]. Since [`Task`] is cloneable
     /// this method can be used to create several identical tasks with different schedules.
     ///
     /// Be careful: [`Task::clone()`] doesn't change `TaskId`, so it's your responsibility to ensure uniqueness of task's Id before

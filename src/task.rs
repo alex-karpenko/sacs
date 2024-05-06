@@ -785,7 +785,7 @@ mod test {
     #[test]
     fn constructors() {
         let task = Task::new(TaskSchedule::OnceDelayed(Duration::from_secs(1)), |_id| {
-            Box::pin(async move { () })
+            Box::pin(async move {})
         });
 
         assert_eq!(
@@ -802,7 +802,7 @@ mod test {
         #[allow(deprecated)]
         let task = Task::new_with_id(
             TaskSchedule::OnceDelayed(Duration::from_secs(1)),
-            |_id| Box::pin(async move { () }),
+            |_id| Box::pin(async move {}),
             id.into(),
         );
         assert_eq!(task.id().to_string(), id.to_string());
@@ -820,7 +820,7 @@ mod test {
 
     #[test]
     fn debug_formatter() {
-        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move { () })).with_id("TEST");
+        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {})).with_id("TEST");
 
         assert_eq!(format!("{:?}", task), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }} }}"));
 

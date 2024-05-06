@@ -154,7 +154,7 @@ mod test {
 
     #[test]
     fn debug_formatter() {
-        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move { () })).with_id("TEST");
+        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {})).with_id("TEST");
         let job = Job::new(JobId::new(task.id()), task.job);
 
         assert_eq!(

@@ -208,7 +208,7 @@ mod test {
 
         assert_ne!(EventId::default(), EventId::default());
         assert_eq!(Event::with_id(id.clone()).id(), EventId::from(id.clone()));
-        assert_eq!(Event::with_time(now.clone()).time(), now);
+        assert_eq!(Event::with_time(now).time(), now);
     }
 
     #[test]

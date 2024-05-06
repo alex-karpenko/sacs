@@ -11,7 +11,7 @@ use uuid::Uuid;
 ///
 /// Executor creates `JobId` for each running job and provides it to job's closure as a parameter (`id` in the example below).
 ///
-/// String representation of the `JobId` is `"{task_id}/{job_id}"`.
+/// String representation of the `JobId` is `"{task_id}/{id}"`.
 ///
 /// Common usage of `JobId` inside task closure is for logging.
 ///
@@ -23,7 +23,7 @@ use uuid::Uuid;
 ///
 /// let task = Task::new(TaskSchedule::Once, |id| {
 ///     Box::pin(async move {
-///         println!("Starting job, TaskId={}, JobId={}.", id.task_id, id.job_id);
+///         println!("Starting job, TaskId={}, JobId={}.", id.task_id, id.id);
 ///         // Actual async workload here
 ///         tokio::time::sleep(Duration::from_secs(1)).await;
 ///         // ...
@@ -32,17 +32,18 @@ use uuid::Uuid;
 ///     });
 /// ```
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub struct JobId {
+    /// Unique ID of the running Job within particular `Task`.
+    pub id: Uuid,
     /// ID of the `Task` which owns this Job, is provided from `Scheduler` during scheduled starting of the `Task` instance.
     pub task_id: TaskId,
-    /// Unique ID of the running Job within particular `Task`.
-    pub job_id: Uuid,
 }
 
 impl JobId {
     pub(crate) fn new(task_id: impl Into<TaskId>) -> Self {
         Self {
-            job_id: Uuid::new_v4(),
+            id: Uuid::new_v4(),
             task_id: task_id.into(),
         }
     }
@@ -51,7 +52,7 @@ impl JobId {
 impl From<TaskId> for JobId {
     fn from(value: TaskId) -> Self {
         Self {
-            job_id: Uuid::new_v4(),
+            id: Uuid::new_v4(),
             task_id: value,
         }
     }
@@ -60,7 +61,7 @@ impl From<TaskId> for JobId {
 impl From<&TaskId> for JobId {
     fn from(value: &TaskId) -> Self {
         Self {
-            job_id: Uuid::new_v4(),
+            id: Uuid::new_v4(),
             task_id: value.to_owned(),
         }
     }
@@ -68,13 +69,13 @@ impl From<&TaskId> for JobId {
 
 impl From<JobId> for String {
     fn from(value: JobId) -> Self {
-        format!("{}/{}", value.task_id, value.job_id)
+        format!("{}/{}", value.task_id, value.id)
     }
 }
 
 impl Display for JobId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}", self.task_id, self.job_id)
+        write!(f, "{}/{}", self.task_id, self.id)
     }
 }
 
@@ -142,11 +143,11 @@ mod test {
 
         assert_eq!(
             format!("{job_id}"),
-            format!("{}/{}", job_id.task_id, job_id.job_id)
+            format!("{}/{}", job_id.task_id, job_id.id)
         );
         assert_eq!(
             String::from(job_id.clone()),
-            format!("{}/{}", job_id.task_id, job_id.job_id)
+            format!("{}/{}", job_id.task_id, job_id.id)
         );
     }
 }

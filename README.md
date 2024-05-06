@@ -21,9 +21,9 @@
 
 ## Quick start
 
-Just create `Scheduler` and add `Task` to it.
-
-Refer to the crate's documentation for more examples and details of possible usage.
+Just create [`Scheduler`](https://docs.rs/sacs/latest/sacs/scheduler/struct.Scheduler.html) and
+add [`Task`](https://docs.rs/sacs/latest/sacs/task/struct.Task.html) to it.
+Refer to the [`crate's documentation`](https://docs.rs/sacs/latest/sacs/) for more examples and details of possible usage.
 
 ```rust
 use sacs::{
@@ -67,6 +67,9 @@ async fn main() -> Result<()> {
 
 ## TODO
 
+- [x] Make [`TaskId`](https://docs.rs/sacs/latest/sacs/task/struct.TaskId.html) and
+[`JobId`](https://docs.rs/sacs/latest/sacs/job/struct.JobId.html) more flexible and
+convenient to create and refer tasks.
 - [ ] More examples.
 - [ ] Tracing.
 

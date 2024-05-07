@@ -344,7 +344,7 @@ impl Display for TaskId {
 ///             });
 /// ```
 ///
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TaskSchedule {
     /// Starts job immediately and runs it once (no repetitions).
     Once,
@@ -703,21 +703,25 @@ mod test {
         assert_eq!(state.status(), TaskStatus::New);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
+        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
 
         state.enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
+        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 1, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
 
         state.enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
+        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 2, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
 
         state.scheduled(job1.clone());
         assert_eq!(state.status(), TaskStatus::Scheduled);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 1, scheduled: 1, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {{JobId {{ id: {}, task_id: TaskId {{ id: \"task 1 id\" }} }}}}, running_jobs: {{}}, last_finished_at: \"None\" }}", job1.id.to_string()));
 
         state.started(job1.clone());
         assert_eq!(state.status(), TaskStatus::Running);
@@ -728,6 +732,10 @@ mod test {
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([job1.clone(), job2.clone()]);
+        assert_eq!(jobs, expected);
 
         state.cancelled(&job2);
         assert_eq!(state.status(), TaskStatus::Running);
@@ -772,5 +780,53 @@ mod test {
 
         assert_eq!(String::from(TaskId::from(uuid_id)), str_id);
         assert_eq!(String::from(&TaskId::from(uuid_id)), str_id);
+    }
+
+    #[test]
+    fn constructors() {
+        let task = Task::new(TaskSchedule::OnceDelayed(Duration::from_secs(1)), |_id| {
+            Box::pin(async move {})
+        });
+
+        assert_eq!(
+            task.clone().with_id("TEST").id().to_string(),
+            String::from("TEST")
+        );
+        assert_eq!(
+            task.clone().with_schedule(TaskSchedule::Once).schedule(),
+            TaskSchedule::Once
+        );
+        assert_eq!(task.status(), TaskStatus::New);
+
+        let id = Uuid::new_v4();
+        #[allow(deprecated)]
+        let task = Task::new_with_id(
+            TaskSchedule::OnceDelayed(Duration::from_secs(1)),
+            |_id| Box::pin(async move {}),
+            id.into(),
+        );
+        assert_eq!(task.id().to_string(), id.to_string());
+        assert_eq!(task.status(), TaskStatus::New);
+
+        assert_eq!(
+            CronSchedule::try_from("1 2 3 4 5").unwrap(),
+            CronSchedule::try_from(String::from("1 2 3 4 5")).unwrap()
+        );
+        assert_eq!(
+            CronSchedule::try_from("1 2 3 4 5").unwrap(),
+            CronSchedule::try_from(&String::from("1 2 3 4 5")).unwrap()
+        );
+    }
+
+    #[test]
+    fn debug_formatter() {
+        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {})).with_id("TEST");
+
+        assert_eq!(format!("{:?}", task), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }} }}"));
+
+        assert_eq!(
+            format!("{}", CronSchedule::try_from("1 2 3 4 5").unwrap()),
+            String::from("0 1 2 3 4 5")
+        );
     }
 }

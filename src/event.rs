@@ -30,6 +30,28 @@ impl From<&Uuid> for EventId {
     }
 }
 
+impl From<String> for EventId {
+    fn from(value: String) -> Self {
+        Self { id: value }
+    }
+}
+
+impl From<&String> for EventId {
+    fn from(value: &String) -> Self {
+        Self {
+            id: value.to_string(),
+        }
+    }
+}
+
+impl From<&str> for EventId {
+    fn from(value: &str) -> Self {
+        Self {
+            id: value.to_string(),
+        }
+    }
+}
+
 impl From<EventId> for String {
     fn from(value: EventId) -> Self {
         value.id
@@ -66,7 +88,6 @@ impl Event {
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_id(id: impl Into<EventId>) -> Self {
         Self {
             id: id.into(),
@@ -151,8 +172,56 @@ mod test {
 
         assert_eq!(EventId::from(uuid_id), event_id);
         assert_eq!(EventId::from(&uuid_id), event_id);
+        assert_eq!(EventId::from(str_id.clone()), event_id);
+        assert_eq!(EventId::from(&str_id), event_id);
+        assert_eq!(
+            EventId::from("EVENT_ID"),
+            EventId {
+                id: "EVENT_ID".to_string()
+            }
+        );
+
+        let id = String::from("TEST");
+        let now = SystemTime::now();
+        let event = Event::new(id.clone(), now);
+        let task_id = TaskId::from(id.clone());
 
         assert_eq!(String::from(&event_id), str_id);
         assert_eq!(String::from(event_id), str_id);
+
+        assert_eq!(Event::from(now).time, now);
+        assert_eq!(Event::from(&now).time, now);
+
+        assert_eq!(EventId::from(event.clone()).id, id);
+        assert_eq!(EventId::from(&event).id, id);
+
+        assert_eq!(EventId::from(task_id).id, id);
+
+        assert_eq!(SystemTime::from(event.clone()), now);
+        assert_eq!(SystemTime::from(&event), now);
+    }
+
+    #[test]
+    fn constructors() {
+        let id = String::from("TEST");
+        let now = SystemTime::now();
+
+        assert_ne!(EventId::default(), EventId::default());
+        assert_eq!(Event::with_id(id.clone()).id(), EventId::from(id.clone()));
+        assert_eq!(Event::with_time(now).time(), now);
+    }
+
+    #[test]
+    fn debug_formatter() {
+        let id = String::from("TEST");
+        let now = SystemTime::now();
+
+        assert_eq!(
+            format!("{:?}", Event::new(id, now)),
+            format!(
+                "Event {{ id: EventId {{ id: \"TEST\" }}, time: \"{}\" }}",
+                DateTime::<Local>::from(now)
+            )
+        );
     }
 }

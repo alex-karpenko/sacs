@@ -813,11 +813,9 @@ mod test {
             TaskSchedule::Cron("*/5 * * * * *".try_into().unwrap(), CronOpts::default()),
         ]);
         let durations = [Duration::from_millis(1200), Duration::from_millis(3500)];
-        let scheduler = Scheduler::new(
-            WorkerType::CurrentRuntime,
-            WorkerParallelism::Limited(2),
-            GarbageCollector::default(),
-        );
+        let scheduler = SchedulerBuilder::new()
+            .parallelism(WorkerParallelism::Limited(2))
+            .build();
 
         // wait for next 10 seconds interval
         let now = SystemTime::now()
@@ -880,11 +878,9 @@ mod test {
             },
         )]);
         let durations = [Duration::from_millis(1000)];
-        let scheduler = Scheduler::new(
-            WorkerType::CurrentRuntime,
-            WorkerParallelism::Unlimited,
-            GarbageCollector::default(),
-        );
+        let scheduler = SchedulerBuilder::new()
+            .parallelism(WorkerParallelism::Unlimited)
+            .build();
 
         // wait for next 5 seconds interval
         let now = SystemTime::now()
@@ -1194,6 +1190,7 @@ mod test {
     #[tokio::test]
     async fn reject_duplicated_task() {
         let scheduler = SchedulerBuilder::new()
+            .worker_type(WorkerType::CurrentThread)
             .garbage_collector(GarbageCollector::disabled())
             .build();
 
@@ -1223,8 +1220,49 @@ mod test {
         }
 
         scheduler
-            .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
+            .shutdown(ShutdownOpts::IgnoreRunning)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn shutdown_with_timeout() {
+        let scheduler = Scheduler::default();
+
+        // Every 100ms work for 2s
+        let task = Task::new(TaskSchedule::Interval(Duration::from_millis(100)), |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        });
+        scheduler.add(task).await.unwrap();
+        yield_now().await;
+
+        scheduler
+            .shutdown(ShutdownOpts::WaitFor(Duration::from_secs(3)))
+            .await
+            .unwrap();
+
+        let scheduler = Scheduler::default();
+
+        // Long task
+        let task = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            })
+        });
+        scheduler.add(task).await.unwrap();
+        yield_now().await;
+
+        match scheduler
+            .shutdown(ShutdownOpts::WaitFor(Duration::from_secs(1)))
+            .await
+        {
+            Ok(_) => unreachable!("unexpected Ok result"),
+            Err(e) => match e {
+                Error::IncompleteShutdown => {}
+                _ => unreachable!("failed with unexpected error"),
+            },
+        }
     }
 }

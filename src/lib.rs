@@ -152,3 +152,14 @@ impl<T> Default for ControlChannel<T> {
         Self::new(DEFAULT_CONTROL_CHANNEL_SIZE)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn constructors() {
+        let cc = ControlChannel::<bool>::default();
+        assert_eq!(cc.sender.capacity(), DEFAULT_CONTROL_CHANNEL_SIZE);
+    }
+}

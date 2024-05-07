@@ -41,6 +41,7 @@ jobs:
             -s src \
             -t lcov \
             --ignore "/*" \
+            --excl-line '^\s*\.await\??;?$' --excl-br-line '^\s*\.await\??;?$' \
             -o lcov.info
 
       - name: Upload coverage reports to Codecov

@@ -123,6 +123,7 @@ impl JobState {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::task::{Task, TaskSchedule};
 
     #[test]
     fn job_state_finished() {
@@ -148,6 +149,20 @@ mod test {
         assert_eq!(
             String::from(job_id.clone()),
             format!("{}/{}", job_id.task_id, job_id.id)
+        );
+    }
+
+    #[test]
+    fn debug_formatter() {
+        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {})).with_id("TEST");
+        let job = Job::new(JobId::new(task.id()), task.job);
+
+        assert_eq!(
+            format!("{:?}", job),
+            format!(
+                "Job {{ id: JobId {{ id: {}, task_id: TaskId {{ id: \"TEST\" }} }} }}",
+                job.id().id
+            )
         );
     }
 }

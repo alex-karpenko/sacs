@@ -157,8 +157,8 @@ impl Worker {
                                         },
                                         ShutdownOpts::WaitFor(timeout) => {
                                             select! {
-                                                _ = futures::future::join_all(handlers) => {},
-                                                _ = tokio::time::sleep(timeout) => {},
+                                                _ = futures::future::join_all(handlers) => { debug!("worker: completed shutdown with WaitFor option") },
+                                                _ = tokio::time::sleep(timeout) => { debug!("worker: timed out shutdown with WaitFor option") },
                                             };
                                         },
                                     };

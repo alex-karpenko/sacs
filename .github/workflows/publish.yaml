@@ -1,17 +1,74 @@
-name: Publish to Crates.io
+name: Release
+permissions:
+  contents: write
 on:
   workflow_dispatch:
-  release:
-    types: [published]
+  push:
+    tags: ["v*.*.*"]
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  publish:
-    name: Publish
+  generate-changelog:
+    name: Generate changelog
+    runs-on: ubuntu-latest
+    outputs:
+      release_body: ${{ steps.git-cliff.outputs.content }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release changelog
+        uses: orhun/git-cliff-action@v3
+        id: git-cliff
+        with:
+          config: cliff.toml
+          args: -v --latest --strip header --github-token ${{ secrets.GITHUB_TOKEN }}
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Generate full changelog
+        uses: orhun/git-cliff-action@v3
+        with:
+          config: cliff.toml
+          args: -v --github-token ${{ secrets.GITHUB_TOKEN }}
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Commit changelog
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email github-actions[bot]@users.noreply.github.com
+          set +e
+          git checkout main
+          git add CHANGELOG.md
+          git commit -m "Update changelog [skip ci]"
+          git push
+
+  release:
+    name: Release to Github
+    needs: generate-changelog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: "${{ needs.generate-changelog.outputs.release_body }}"
+          name: "Release ${{ github.ref_name }}"
+
+  publish:
+    name: Publish to Crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup toolchain
         uses: dtolnay/rust-toolchain@stable

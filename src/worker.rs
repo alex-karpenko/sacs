@@ -15,7 +15,7 @@ const WORKER_CONTROL_CHANNEL_SIZE: usize = 1024;
 pub trait AsyncWorker {
     /// Start one more job
     async fn start(&self, job: Job) -> Result<JobId>;
-    /// Cancel single running job
+    /// Cancel a single running job
     async fn cancel(&self, id: &JobId) -> Result<()>;
     /// Shutdown worker
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
@@ -29,7 +29,7 @@ enum ChangeStateEvent {
 }
 
 pub struct Worker {
-    tokio_handler: Option<tokio::task::JoinHandle<()>>,
+    tokio_handler: Option<JoinHandle<()>>,
     thread_handler: Option<std::thread::JoinHandle<()>>,
     channel: Sender<ChangeStateEvent>,
 }
@@ -92,7 +92,7 @@ impl Worker {
         let mut ids: Vec<JobId> = Vec::new();
         let mut handlers: Vec<JoinHandle<()>> = Vec::new();
 
-        // Push single always-pending job to avoid panics on empty select_all
+        // Push a single always-pending job to avoid panics on empty select_all
         let fake_id = JobId::new(Uuid::new_v4());
         let fake_handler =
             tokio::task::spawn(Box::pin(async { futures::future::pending::<()>().await }));
@@ -161,7 +161,7 @@ impl Worker {
                                             select! {
                                                 _ = futures::future::join_all(handlers) => { debug!("completed shutdown") },
                                                 _ = tokio::time::sleep(timeout) => { debug!("timed out shutdown") },
-                                            };
+                                            }
                                         },
                                     };
                                 }
@@ -224,7 +224,7 @@ impl AsyncWorker for Worker {
         self.send_event(ChangeStateEvent::Shutdown(opts.clone()))
             .await?;
 
-        // Define waiter func with respect to type of runtime thread
+        // Define waiter func with respect to the type of runtime thread
         let worker_waiter = async {
             if let Some(handler) = self.tokio_handler {
                 debug!("waiting for async handler completion");

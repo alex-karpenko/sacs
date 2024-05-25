@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
 [`JobId`](https://docs.rs/sacs/latest/sacs/job/struct.JobId.html) more flexible and
 convenient to create and refer tasks.
 - [ ] More examples.
-- [ ] Tracing.
+- [x] Tracing.
 
 ## License
 

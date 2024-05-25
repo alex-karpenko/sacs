@@ -20,7 +20,7 @@ use tokio::{
     sync::{mpsc::Sender, RwLock},
     task::yield_now,
 };
-use tracing::{debug, warn};
+use tracing::{debug, debug_span, instrument, warn};
 
 /// Default maximin number of jobs to run on the single worker
 pub(crate) const DEFAULT_MAX_PARALLEL_JOBS: usize = 16;
@@ -262,6 +262,7 @@ impl GarbageCollector {
 }
 
 impl GarbageCollector {
+    #[instrument(skip_all)]
     async fn collect_garbage(tasks: Arc<RwLock<HashMap<TaskId, Task>>>, expire_after: Duration) {
         let mut tasks = tasks.write().await;
         let expired_at = SystemTime::now().checked_sub(expire_after).unwrap();
@@ -279,7 +280,7 @@ impl GarbageCollector {
             .collect();
 
         to_remove.iter().for_each(|id| {
-            debug!("collect_garbage: remove expired task={id}");
+            debug!(task_id = %id, "remove expired task");
             tasks.remove(id);
         });
     }
@@ -412,13 +413,13 @@ impl Scheduler {
                     move |id| {
                         let tasks = tasks.clone();
                         Box::pin(async move {
-                            debug!("garbage_collector: GC job {id} started.");
+                            debug!(job_id = %id, "start collecting garbage");
                             GarbageCollector::collect_garbage(tasks, expire_after).await;
-                            debug!("garbage_collector: GC job {id} finished.");
                         })
                     },
                 );
                 // Enqueue GC task, it will be processed in first run of events loop
+                debug!(task = ?task, "schedule GC task");
                 channel
                     .send(ChangeStateEvent::EnqueueTask(task))
                     .await
@@ -426,13 +427,14 @@ impl Scheduler {
             }
         }
 
-        debug!("work: start events loop");
         loop {
             select! {
                 biased;
                 event = channel.receive() => {
+                    let control_stream_span = debug_span!("control_stream");
+                    let _control_stream_span = control_stream_span.enter();
                     if let Some(event) = event {
-                        debug!("work: control event={:?}", event);
+                        debug!(event = ?event, "control event received");
                         match event {
                             ChangeStateEvent::Shutdown(opts) => {
                                 queue.shutdown().await;
@@ -468,12 +470,14 @@ impl Scheduler {
                             }
                         }
                     } else {
-                        warn!("work: empty events channel");
+                        warn!("empty events channel");
                     }
                 },
                 event = queue.next() => {
+                    let queue_stream_span = debug_span!("queue_stream");
+                    let _queue_stream_span = queue_stream_span.enter();
                     if let Ok(event) = event {
-                        debug!("work: queue event={:?}", event);
+                        debug!(event= ?event, "queue event received");
                         let mut tasks = tasks.write().await;
                         let task = tasks.get_mut(&event.id.into());
 
@@ -492,13 +496,15 @@ impl Scheduler {
                             }
                         }
                         } else {
-                            warn!("work: error from queue received={:?}, exiting", event);
+                            warn!(event = ?event, "error from queue received, exiting");
                             return Err(event.err().unwrap())
                         }
                     },
                 job_id = executor.work() => {
+                    let executor_events_span = debug_span!("executor_events");
+                    let _executor_events_span = executor_events_span.enter();
                     if let Ok(job_id) = job_id {
-                        debug!("work: executor event={:?}", job_id);
+                        debug!(job_id = %job_id, "executor event received");
                         let mut tasks = tasks.write().await;
                         let job_state = executor.state(&job_id).await?;
                         let task_id = jobs.get(&job_id);
@@ -506,7 +512,7 @@ impl Scheduler {
                             let is_finished = {
                                 let task = tasks.get_mut(task_id);
                                 if let Some(task) = task {
-                                    debug!("work: job status changed={:?}", job_state);
+                                    debug!(job_state = ?job_state, "job state changed");
                                     let mut at = None;
                                     match job_state {
                                         JobState::Running => { task.state.started(job_id); },
@@ -532,19 +538,21 @@ impl Scheduler {
                             };
                             // Remove task from state if GC is Immediate
                             if is_finished && garbage_collector == GarbageCollector::Immediate {
-                                debug!("work: immediate GC, remove finished task {task_id}");
+                                debug!(task_id = %task_id, "remove finished task");
                                 tasks.remove(task_id);
                             }
                         }
                     } else {
-                        warn!("work: error from executor received={:?}", job_id);
+                        warn!(job_id = ?job_id, "error from executor received");
                     }
                 }
             }
         }
     }
 
+    #[instrument(skip(self))]
     async fn send_event(&self, event: ChangeStateEvent) -> Result<()> {
+        debug!("send event");
         self.channel
             .send(event)
             .await
@@ -569,7 +577,9 @@ impl TaskScheduler for Scheduler {
     ///
     /// Returns [`TaskId`] of the scheduled task or [`Error::DuplicatedTaskId`] if task with the same `TaskId` is already present,
     /// even if it's finished but not removed by getting it's status or by garbage collector.
+    #[instrument(skip(self))]
     async fn add(&self, task: Task) -> Result<TaskId> {
+        debug!("add task");
         let id = task.id();
         yield_now().await; // to avoid scheduling several tasks within single async scheduler cycle
         if self.tasks.read().await.get(&id).is_some() {
@@ -584,7 +594,9 @@ impl TaskScheduler for Scheduler {
     /// task can be killed or left to continue working up to finish.
     ///
     /// Returns [`Error::IncorrectTaskId`] if task is not scheduled or cleaned by garbage collector.
+    #[instrument(skip(self))]
     async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()> {
+        debug!("cancel task");
         self.send_event(ChangeStateEvent::DropTask(id, opts)).await
     }
 
@@ -592,14 +604,16 @@ impl TaskScheduler for Scheduler {
     ///
     /// If task is finished then it's status will be removed from the scheduler after
     /// this method call, so following calls with te same `TaskId` will fail with [`Error::IncorrectTaskId`].
+    #[instrument(skip(self))]
     async fn status(&self, id: &TaskId) -> Result<TaskStatus> {
+        debug!("task status requested");
         let mut tasks = self.tasks.write().await;
         let task = tasks.get_mut(id);
 
         if let Some(task) = task {
             let status = task.state.status();
             if task.state.finished() {
-                debug!("status: remove finished task {id}");
+                debug!("remove finished task");
                 tasks.remove(id);
             }
             return Ok(status);
@@ -613,8 +627,9 @@ impl TaskScheduler for Scheduler {
     /// - shuts down executing engine with respect to [`ShutdownOpts`].
     ///
     /// Can return [`Error::IncompleteShutdown`] in case of errors.
+    #[instrument(skip(self))]
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
-        debug!("shutdown: requested with opts={opts:?}");
+        debug!("shutdown requested");
         self.send_event(ChangeStateEvent::Shutdown(opts.clone()))
             .await?;
 

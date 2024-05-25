@@ -6,7 +6,7 @@ use crate::{
 };
 use std::collections::{HashMap, VecDeque};
 use tokio::{select, sync::RwLock};
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 /// Default size of control channels
 const EXECUTOR_CONTROL_CHANNEL_SIZE: usize = 1024;
@@ -53,6 +53,7 @@ impl Executor {
         }
     }
 
+    #[instrument(skip(self))]
     async fn requeue_jobs(&self) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         // Nothing to execute
@@ -79,7 +80,7 @@ impl Executor {
             }
         };
 
-        debug!("requeue_jobs: {} new jobs can be started", jobs_to_run);
+        debug!(jobs_to_run, "dispatch pending jobs");
         for _ in 0..jobs_to_run {
             if let Some(job) = jobs.pending.pop_front() {
                 let id = job.id();
@@ -101,10 +102,11 @@ impl Default for Executor {
 }
 
 impl JobExecutor for Executor {
+    #[instrument(skip(self))]
     async fn work(&self) -> Result<JobId> {
         select! {
             event = self.control_channel.receive() => {
-                debug!("work: control event={:?}", event);
+                debug!(?event, "control event received");
                 if let Some(event) = event {
                     match event {
                         ChangeExecutorStateEvent::JobStarted(id) => {
@@ -127,15 +129,16 @@ impl JobExecutor for Executor {
                         },
                     }
                 } else {
-                    warn!("work: empty control channel");
+                    warn!("empty control channel");
                     Err(Error::ReceivingChangeStateEvent)
                 }
             }
         }
     }
 
+    #[instrument(skip(self))]
     async fn enqueue(&self, job: Job) -> Result<JobId> {
-        debug!("enqueue: job={:?}", job);
+        debug!("enqueue new job");
         let id = job.id();
         {
             let mut jobs = self.jobs.write().await;
@@ -149,14 +152,16 @@ impl JobExecutor for Executor {
         Ok(id)
     }
 
+    #[instrument(skip(self))]
     async fn cancel(&self, id: &JobId) -> Result<()> {
-        debug!("cancel: job id={:?}", id);
+        debug!("cancel job");
         self.worker.cancel(id).await?;
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn state(&self, id: &JobId) -> Result<JobState> {
-        debug!("state: id={:?}", id);
+        debug!("job state requested");
         let mut jobs = self.jobs.write().await;
         if let Some(state) = jobs.state.get(id) {
             let response = Ok(state.clone());
@@ -170,8 +175,9 @@ impl JobExecutor for Executor {
         }
     }
 
+    #[instrument(skip(self))]
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
-        debug!("shutdown: requested");
+        debug!("shutdown requested");
         let result = self.worker.shutdown(opts).await;
         self.jobs.write().await.clear();
 

@@ -10,7 +10,7 @@ license = "MIT"
 name = "sacs"
 readme = "README.md"
 repository = "https://github.com/alex-karpenko/sacs"
-version = "0.5.0"
+version = "0.6.0"
 exclude = [
     ".github/**",
     ".vscode/**",
@@ -37,7 +37,7 @@ tokio = { version = "1.37.0", features = [
     "rt",
     "rt-multi-thread",
 ] }
-tracing = { version = "0.1.40", default-features = false, features = ["std"] }
+tracing = { version = "0.1.40", default-features = false, features = ["std", "attributes"] }
 uuid = { version = "1.8.0", features = ["fast-rng", "v4"] }
 
 [features]
@@ -45,3 +45,4 @@ async-trait = []
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3.18" }
+ctor = { version = "0.2.8", default-features = false }

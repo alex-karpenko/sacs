@@ -5,8 +5,8 @@
 //! ## Features
 //!
 //! - Runs tasks with different types of schedule: once, with delay, by interval, with cron schedule.
-//! - Uses current `Tokio` runtime or creates new one with specified type, number of threads and limited parallelism.
-//! - Allows task cancellation and getting current state of task.
+//! - Uses current `Tokio` runtime or creates new one with a specified type, number of threads and limited parallelism.
+//! - Allows task cancellation and getting current state of the task.
 //! - Lightweight, small, easy to use.
 //!
 //! ## Quick start
@@ -30,7 +30,7 @@
 //!     // Create scheduler with default config
 //!     let scheduler = Scheduler::default();
 //!
-//!     // Create task with cron schedule: repeat it every 3 seconds
+//!     // Create a task with cron schedule: repeat it every 3 seconds
 //!     let cron = TaskSchedule::Cron("*/3 * * * * *".try_into()?, CronOpts::default());
 //!     let task = Task::new(cron, |id| {
 //!         Box::pin(async move {
@@ -48,7 +48,7 @@
 //!     // ... and do any other async work in parallel
 //!     tokio::time::sleep(Duration::from_secs(10)).await;
 //!
-//!     // It's not mandatory but good to shutdown scheduler
+//!     // It's not mandatory, but good to shut down scheduler
 //!     // Wait for completion of all running jobs
 //!     scheduler.shutdown(ShutdownOpts::WaitForFinish).await
 //! }
@@ -63,6 +63,7 @@ pub mod task;
 mod worker;
 
 use job::JobId;
+use std::fmt::Debug;
 use std::{future::Future, pin::Pin, sync::Arc};
 use task::TaskId;
 use thiserror::Error;
@@ -100,10 +101,10 @@ pub enum Error {
     DuplicatedTaskId(TaskId),
     #[error("cron expression is invalid")]
     InvalidCronExpression(#[from] cron::error::Error),
-    /// Unable to receive change state event due to closed or errored channel
+    /// Unable to receive change state event due to the closed channel or error
     #[error("unable to receive event from control channel")]
     ReceivingChangeStateEvent,
-    /// Unable to send change state event due to closed or errored channel
+    /// Unable to send change state event due to the closed channel or error
     #[error("unable to send event ot control channel")]
     SendingChangeStateEvent,
     /// Unable to complete state change request because shutdown has been initiated
@@ -114,12 +115,13 @@ pub enum Error {
     SystemTimeOperation(#[from] std::time::SystemTimeError),
 }
 
-struct ControlChannel<T> {
+#[derive(Debug)]
+struct ControlChannel<T: Debug> {
     sender: Sender<T>,
     receiver: RwLock<Receiver<T>>,
 }
 
-impl<T> ControlChannel<T> {
+impl<T: Debug> ControlChannel<T> {
     fn new(size: usize) -> Self {
         let (sender, receiver) = mpsc::channel::<T>(size);
         Self {
@@ -147,7 +149,7 @@ impl<T> ControlChannel<T> {
     }
 }
 
-impl<T> Default for ControlChannel<T> {
+impl<T: Debug> Default for ControlChannel<T> {
     fn default() -> Self {
         Self::new(DEFAULT_CONTROL_CHANNEL_SIZE)
     }

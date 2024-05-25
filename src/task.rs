@@ -1,4 +1,5 @@
-//! [`Task`] object represents single job with schedule. Use it to create workload of different types and post it to `Scheduler`.
+//! [`Task`] object represents a single job with schedule.
+//! Use it to create workload of different types and post it to `Scheduler`.
 //!
 //! Module contains everything related to [`Task`], it's [`TaskSchedule`] and [`state`](TaskStatus).
 //!
@@ -15,10 +16,10 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, instrument};
 use uuid::Uuid;
 
-/// `Task` represents single job with it's schedule, attributes and state.
+/// `Task` represents a single job with its schedule, attributes, and state.
 #[derive(Clone)]
 pub struct Task {
     pub(crate) id: TaskId,
@@ -61,14 +62,14 @@ impl Task {
 
     /// Set explicit [`TaskId`] to the existing [`Task`].
     ///
-    /// This method is useful if you need to know [`TaskId`] before task was scheduled.
+    /// This method is useful if you need to know [`TaskId`] before the task was scheduled.
     ///
     /// # Note:
-    /// **_If you provide explicit [`TaskId`] value, your responsibility is to ensure uniqueness of the [`TaskId`]
+    /// **_If you provide explicit [`TaskId`] value, your responsibility is to ensure the uniqueness of the [`TaskId`]
     /// within instance of `Scheduler`._**
     ///
-    /// This method consumes `Task` instance and returns the same instance with specified `Id`. Since [`Task`] is cloneable
-    /// this method can be used to create several identical tasks with different `TaskId`s.
+    /// This method consumes `Task` instance and returns the same instance with specified `Id`.
+    /// Since [`Task`] is cloneable, this method can be used to create several identical tasks with different `TaskId`s.
     ///
     /// # Examples:
     ///
@@ -112,14 +113,16 @@ impl Task {
 
     /// Set specific [`TaskSchedule`] to the existing [`Task`].
     ///
-    /// Method is useful if you need to create new task based on existing (not scheduled yet) [`Task`].
+    /// Method is useful if you need to create a new task based on existing (not scheduled yet) [`Task`].
     ///
-    /// Method consumes `Task` instance and returns the same instance with specified [`TaskSchedule`]. Since [`Task`] is cloneable
-    /// this method can be used to create several identical tasks with different schedules.
+    /// Method consumes `Task` instance and returns the same instance with specified [`TaskSchedule`].
+    /// Since [`Task`] is cloneable, this method can be used to create several identical tasks with different schedules.
     ///
-    /// Be careful: [`Task::clone()`] doesn't change `TaskId`, so it's your responsibility to ensure uniqueness of task's Id before
-    /// posting it to `Scheduler`. Anyway `Scheduler::add()` method rejects new `Task` if the same (with the same `TaskId`) is already present,
-    /// even if it's finished but not removed by getting it's status or by garbage collector.
+    /// Be careful: [`Task::clone()`] doesn't change `TaskId`,
+    /// so it's your responsibility to ensure the uniqueness of task's Id before
+    /// posting it to `Scheduler`.
+    /// Anyway, `Scheduler::add()` method rejects new `Task` if the same (with the same `TaskId`) is already present,
+    /// even if it's finished but not removed by getting its status or by garbage collector.
     ///
     /// # Examples:
     ///
@@ -157,12 +160,12 @@ impl Task {
 
     /// Create a new [`Task`] with a specified schedule, job function and explicit [`TaskId`].
     ///
-    /// This method is useful if you need to know [`TaskId`] before task was scheduled.
-    /// Or need to use [`TaskId`] within job context: for particular task it's TaskId is constant value,
+    /// This method is useful if you need to know [`TaskId`] before a task is scheduled.
+    /// Or need to use [`TaskId`] within job context: for a particular task it's TaskId is constant value,
     /// but JobId varies for each task run.
     ///
     /// # Note:
-    /// **_If you provide explicit [`TaskId`] value, your responsibility is to ensure uniqueness of the [`TaskId`]
+    /// **_If you provide explicit [`TaskId`] value, your responsibility is to ensure the uniqueness of the [`TaskId`]
     /// within instance of `Scheduler`._**
     ///
     /// # Examples:
@@ -236,7 +239,7 @@ impl std::fmt::Debug for Task {
     }
 }
 
-/// Unique identifier of [`Task`] which can be used to address task in `Scheduler`.
+/// Unique identifier of [`Task`] which can be used to address the task in `Scheduler`.
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub struct TaskId {
     pub(crate) id: String,
@@ -314,13 +317,15 @@ impl Display for TaskId {
 ///
 /// ## Overview
 ///
-/// - `Once`: the simples one-shot task without schedule. It starts immediately after adding to Scheduler and doesn't repeat after finishing.
+/// - `Once`: the simplest one-shot task without schedule.
+/// It starts immediately after adding to Scheduler and doesn't repeat after finishing.
 /// - `OnceDelayed`: The same as `Once` but it starts after specified delay.
 /// - `Interval`: this is the simplest repeatable task, scheduler starts it immediately after adding, waits for finish
-/// and starts next instance after specified interval. So there can be single working job only with this type of schedule.
-/// - `IntervalDelayed`: it's behavior is similar to `Interval` but scheduler starts first job with some specified delay.
-/// - `Cron`: the most flexible schedule type which use well-known cron [`expressions`](CronSchedule) to define time to run
-/// and [`CronOpts`] parameter which defines behavior of task right after adding to scheduler (start first job immediately or
+/// and starts the next instance after specified interval.
+/// So there can be a single working job only with this type of schedule.
+/// - `IntervalDelayed`: its behavior is similar to `Interval` but scheduler starts first job with some specified delay.
+/// - `Cron`: the most flexible schedule type which uses well-known cron [`expressions`](CronSchedule) to define time to run
+/// and [`CronOpts`] parameter which defines the behavior of task right after adding to scheduler (start first job immediately or
 /// strictly according to the schedule) and allows or restricts concurrent running of jobs.
 ///
 /// ## Examples
@@ -334,8 +339,8 @@ impl Display for TaskId {
 /// let interval_5s = TaskSchedule::Interval(Duration::from_secs(5));
 /// let interval_after_15s = TaskSchedule::IntervalDelayed(Duration::from_secs(15), Duration::from_secs(5));
 ///
-/// // Every every workday, every morning, every 15 minutes.
-/// // Run next job even if previous job is still running.
+/// // Every workday, every morning, every 15 minutes.
+/// // Run the next job even if the previous job is still running.
 /// let cron = TaskSchedule::Cron(
 ///             "*/15 8-11 * * Mon-Fri".try_into().unwrap(),
 ///             CronOpts {
@@ -346,13 +351,13 @@ impl Display for TaskId {
 ///
 #[derive(Clone, Debug, PartialEq)]
 pub enum TaskSchedule {
-    /// Starts job immediately and runs it once (no repetitions).
+    /// Starts the job immediately and runs it once (no repetitions).
     Once,
-    /// Starts job after specified delay and runs it once (no repetitions).
+    /// Starts the job after specified delay and runs it once (no repetitions).
     OnceDelayed(Duration),
-    /// Starts first job immediately and after finishing of previous job repeats it every specified interval.
+    /// Starts the first job immediately and after finishing of the previous job repeats it every specified interval.
     Interval(Duration),
-    /// Starts first job with specified delay and after finishing of first job repeats it every specified interval.
+    /// Starts the first job with specified delay and after finishing of the first job repeats it every specified interval.
     IntervalDelayed(Duration, Duration),
     /// Runs job(s) repeatedly according to [`cron schedule`](CronSchedule) with respect to [`options`](CronOpts).
     /// See examples above and documentation of [`CronSchedule`] and [`CronOpts`] for details.
@@ -417,36 +422,41 @@ impl TaskSchedule {
 /// Defines specific behavior of cron schedule.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CronOpts {
-    /// If `true` then first job will be scheduled right after adding task to scheduler even if
+    /// If `true` then the first job will be scheduled right after adding the task to scheduler even if
     /// this time is out of schedule. Default is `false`.
     pub at_start: bool,
-    /// If `true` then scheduler will run new job every moment of schedule regardless of completion
-    /// of previous run. If `false` (default) then scheduler prohibits running several task at the same time
-    /// guaranteeing that single job only will be running.
+    /// If `true` then scheduler will run a new job every moment of schedule regardless of completion
+    /// of previous run.
+    /// If `false` (default), then scheduler prohibits
+    /// running several tasks at the same time guaranteeing that a single job only will be running.
     pub concurrent: bool,
 }
 
-/// Represents current state of [`Task`] instance.
+/// Represents the current state of [`Task`] instance.
 ///
-/// Each task every moment of time has some determined state:
+/// Each task in every moment of time has some determined state:
 /// - just created task which wasn't pushed to scheduler is `New`.
-/// - when scheduler got task it plans when task should be started and puts it to `Waiting` until time to run arrived.
-/// - when start time arrived scheduler posts job (instance of task) to execution engine and move it `Scheduled` state.
-/// - when executor started job (this moment depends on amount of free execution resources) it moves task to `Running` state.
-/// - when task completed it may be rescheduled (if it's repeatable) and moved to `Waiting` or `Scheduled`, or may be `Finished`
+/// - when scheduler got the task it plans when the task should be started and puts it to `Waiting`
+/// until time to run arrived.
+/// - when start time arrived,
+/// the scheduler posts job (instance of a task) to execution engine and moves it `Scheduled` state.
+/// - when executor started the job (this moment depends on the amount of free execution resources),
+/// it moves the task to `Running` state.
+/// - when the task is completed, it may be rescheduled (if it's repeatable) and moved to `Waiting` or `Scheduled`,
+/// or may be `Finished`
 /// if that's kind of one-shot task.
 #[derive(Default, Clone, PartialEq, Debug)]
 pub enum TaskStatus {
     /// Just created, not added to `Scheduler`.
     #[default]
     New,
-    /// Scheduler waits for the specified moment to run job.
+    /// Scheduler waits for the specified moment to run the job.
     Waiting,
     /// Job instance has been scheduled to execute but hasn't been run yet.
     Scheduled,
     /// It works right now.
     Running,
-    /// All jobs of the task have been finished (completed or cancelled) and no more jobs will be scheduled anymore.
+    /// All jobs of the task have been finished (completed or canceled), and no more jobs will be scheduled anymore.
     Finished,
 }
 
@@ -498,38 +508,43 @@ impl TaskState {
         }
     }
 
+    #[instrument]
     pub(crate) fn enqueued(&mut self) -> &Self {
         self.waiting += 1;
-        debug!("enqueue: status={:?}, {self:?}", self.status());
+        debug!("status={:?}", self.status());
         self
     }
 
+    #[instrument]
     pub(crate) fn scheduled(&mut self, id: JobId) -> &Self {
         self.waiting -= 1;
         self.scheduled += 1;
         self.scheduled_jobs.insert(id);
-        debug!("scheduled: status={:?}, {self:?}", self.status());
+        debug!("status={:?}", self.status());
         self
     }
 
+    #[instrument]
     pub(crate) fn started(&mut self, id: JobId) -> &Self {
         self.scheduled -= 1;
         self.running += 1;
         self.scheduled_jobs.remove(&id);
         self.running_jobs.insert(id);
-        debug!("started: status={:?}, {self:?}", self.status());
+        debug!("status={:?}", self.status());
         self
     }
 
+    #[instrument]
     pub(crate) fn completed(&mut self, id: &JobId) -> &Self {
         self.running -= 1;
         self.completed += 1;
         self.running_jobs.remove(id);
         self.last_finished_at = Some(SystemTime::now());
-        debug!("completed: status={:?}, {self:?}", self.status());
+        debug!("status={:?}", self.status());
         self
     }
 
+    #[instrument]
     pub(crate) fn cancelled(&mut self, id: &JobId) -> &Self {
         self.cancelled += 1;
         if self.running_jobs.remove(id) {
@@ -539,7 +554,7 @@ impl TaskState {
             self.scheduled -= 1;
         }
         self.last_finished_at = Some(SystemTime::now());
-        debug!("cancelled: status={:?}, {self:?}", self.status());
+        debug!("status={:?}", self.status());
         self
     }
 
@@ -567,8 +582,8 @@ impl TaskState {
 /// Defines cron expression used by schedule.
 ///
 /// It uses seven items expression: seconds, minutes, hours, days (month), months, days (week), years.
-/// Seconds and years can be omitted: if expression has 5 items it runs at 0 second every year;
-/// if it has 6 items - first item defines seconds.
+/// Seconds and years can be omitted: if an expression has five items, it runs at second 0 every year;
+/// if it has six items - the first item defines seconds.
 ///
 /// ## Examples
 ///
@@ -582,7 +597,7 @@ impl TaskState {
 /// let every_5th_second: CronSchedule = "*/5 * * * * *".try_into().unwrap();
 /// let every_business_hour: CronSchedule = "0 9-18 * * Mon-Fri".try_into().unwrap();
 ///
-/// // Every even year every 10 seconds at 9:00-9:01am on January 1st if this's weekend.
+/// // Every even year every 10 seconds at 9:00-9:01am on January 1st if this is a weekend.
 /// let something_senseless: CronSchedule = "*/10 0 9 1 1 Sat,Sun */2".try_into().unwrap();
 /// ```
 ///
@@ -607,7 +622,7 @@ impl CronSchedule {
 impl TryFrom<String> for CronSchedule {
     type Error = Error;
 
-    fn try_from(value: String) -> std::prelude::v1::Result<Self, Self::Error> {
+    fn try_from(value: String) -> Result<Self, Self::Error> {
         // Sanitize it
         let value = value
             .split(' ')
@@ -631,7 +646,7 @@ impl TryFrom<String> for CronSchedule {
 impl TryFrom<&str> for CronSchedule {
     type Error = Error;
 
-    fn try_from(value: &str) -> std::prelude::v1::Result<Self, Self::Error> {
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::try_from(value.to_string())
     }
 }
@@ -639,7 +654,7 @@ impl TryFrom<&str> for CronSchedule {
 impl TryFrom<&String> for CronSchedule {
     type Error = Error;
 
-    fn try_from(value: &String) -> std::prelude::v1::Result<Self, Self::Error> {
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
         Self::try_from(value.to_string())
     }
 }

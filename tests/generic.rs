@@ -1,3 +1,4 @@
+use ctor::ctor;
 use sacs::{
     job::JobId,
     scheduler::{
@@ -9,6 +10,11 @@ use sacs::{
 };
 use std::{sync::Arc, time::Duration};
 use tokio::sync::RwLock;
+
+#[ctor]
+fn init() {
+    tracing_subscriber::fmt::init();
+}
 
 async fn basic_test_suite(
     scheduler: Scheduler,

@@ -41,7 +41,7 @@ impl ExecutorJobsState {
 
 impl Executor {
     pub fn new(worker_type: WorkerType, parallelism: WorkerParallelism) -> Self {
-        debug!("new: type={:?}, parallelism={parallelism:?}", worker_type);
+        debug!(?worker_type, ?parallelism, "construct new executor");
         let executor_channel = ControlChannel::new(EXECUTOR_CONTROL_CHANNEL_SIZE);
         let to_executor = executor_channel.sender();
 
@@ -53,11 +53,12 @@ impl Executor {
         }
     }
 
-    #[instrument(skip(self))]
+    #[instrument("process pending jobs", skip_all)]
     async fn requeue_jobs(&self) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         // Nothing to execute
         if jobs.pending.is_empty() {
+            debug!("jobs queue is empty");
             return Ok(());
         }
 
@@ -80,10 +81,11 @@ impl Executor {
             }
         };
 
-        debug!(jobs_to_run, "dispatch pending jobs");
+        debug!(count = jobs_to_run, "dispatch pending jobs");
         for _ in 0..jobs_to_run {
             if let Some(job) = jobs.pending.pop_front() {
                 let id = job.id();
+                debug!(job_id = %id, "start job");
                 jobs.state.insert(id, JobState::Starting);
                 self.worker.start(job).await?;
             } else {
@@ -102,11 +104,11 @@ impl Default for Executor {
 }
 
 impl JobExecutor for Executor {
-    #[instrument(skip(self))]
+    #[instrument("waiting for executor event", skip_all)]
     async fn work(&self) -> Result<JobId> {
         select! {
             event = self.control_channel.receive() => {
-                debug!(?event, "control event received");
+                debug!(?event, "event received");
                 if let Some(event) = event {
                     match event {
                         ChangeExecutorStateEvent::JobStarted(id) => {
@@ -129,16 +131,15 @@ impl JobExecutor for Executor {
                         },
                     }
                 } else {
-                    warn!("empty control channel");
+                    warn!("control channel error, exiting");
                     Err(Error::ReceivingChangeStateEvent)
                 }
             }
         }
     }
 
-    #[instrument(skip(self))]
     async fn enqueue(&self, job: Job) -> Result<JobId> {
-        debug!("enqueue new job");
+        debug!(job_id = %job.id(), "enqueue job");
         let id = job.id();
         {
             let mut jobs = self.jobs.write().await;
@@ -152,21 +153,19 @@ impl JobExecutor for Executor {
         Ok(id)
     }
 
-    #[instrument(skip(self))]
     async fn cancel(&self, id: &JobId) -> Result<()> {
-        debug!("cancel job");
+        debug!(job_id = %id, "cancel job");
         self.worker.cancel(id).await?;
         Ok(())
     }
 
-    #[instrument(skip(self))]
     async fn state(&self, id: &JobId) -> Result<JobState> {
-        debug!("job state requested");
+        debug!(job_id = %id, "job state requested");
         let mut jobs = self.jobs.write().await;
         if let Some(state) = jobs.state.get(id) {
             let response = Ok(state.clone());
             if state.finished() {
-                debug!("state: remove finished job state, id={:?}", id);
+                debug!(job_id = %id, "remove finished job state");
                 jobs.state.remove(id);
             }
             response
@@ -175,9 +174,8 @@ impl JobExecutor for Executor {
         }
     }
 
-    #[instrument(skip(self))]
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
-        debug!("shutdown requested");
+        debug!(?opts, "shutdown requested");
         let result = self.worker.shutdown(opts).await;
         self.jobs.write().await.clear();
 

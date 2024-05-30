@@ -20,7 +20,7 @@ use tokio::{
     sync::{mpsc::Sender, RwLock},
     task::yield_now,
 };
-use tracing::{debug, debug_span, instrument, warn};
+use tracing::{debug, instrument, warn};
 
 /// Default maximin number of jobs to run on the single worker
 pub(crate) const DEFAULT_MAX_PARALLEL_JOBS: usize = 16;
@@ -264,7 +264,7 @@ impl GarbageCollector {
 }
 
 impl GarbageCollector {
-    #[instrument(skip_all)]
+    #[instrument("collect garbage", skip_all)]
     async fn collect_garbage(tasks: Arc<RwLock<HashMap<TaskId, Task>>>, expire_after: Duration) {
         let mut tasks = tasks.write().await;
         let expired_at = SystemTime::now().checked_sub(expire_after).unwrap();
@@ -373,7 +373,13 @@ impl Scheduler {
         parallelism: WorkerParallelism,
         garbage_collector: GarbageCollector,
     ) -> Self {
-        debug!("new: type={:?}, parallelism={parallelism:?}", worker_type);
+        debug!(
+            ?worker_type,
+            ?parallelism,
+            ?garbage_collector,
+            "construct new scheduler"
+        );
+
         let channel = ControlChannel::<ChangeStateEvent>::new(SCHEDULER_CONTROL_CHANNEL_SIZE);
         let tasks = Arc::new(RwLock::new(HashMap::new()));
 
@@ -390,6 +396,7 @@ impl Scheduler {
         }
     }
 
+    #[instrument("scheduler loop", skip_all)]
     async fn work(
         worker_type: WorkerType,
         parallelism: WorkerParallelism,
@@ -415,7 +422,7 @@ impl Scheduler {
                     move |id| {
                         let tasks = tasks.clone();
                         Box::pin(async move {
-                            debug!(job_id = %id, "start collecting garbage");
+                            debug!(job_id = %id, "collecting garbage");
                             GarbageCollector::collect_garbage(tasks, expire_after).await;
                         })
                     },
@@ -430,11 +437,10 @@ impl Scheduler {
         }
 
         loop {
+            debug!("scheduler loop iteration");
             select! {
                 biased;
                 event = channel.receive() => {
-                    let control_stream_span = debug_span!("control_stream");
-                    let _control_stream_span = control_stream_span.enter();
                     if let Some(event) = event {
                         debug!(event = ?event, "control event received");
                         match event {
@@ -476,8 +482,6 @@ impl Scheduler {
                     }
                 },
                 event = queue.next() => {
-                    let queue_stream_span = debug_span!("queue_stream");
-                    let _queue_stream_span = queue_stream_span.enter();
                     if let Ok(event) = event {
                         debug!(event= ?event, "queue event received");
                         let mut tasks = tasks.write().await;
@@ -503,8 +507,6 @@ impl Scheduler {
                         }
                     },
                 job_id = executor.work() => {
-                    let executor_events_span = debug_span!("executor_events");
-                    let _executor_events_span = executor_events_span.enter();
                     if let Ok(job_id) = job_id {
                         debug!(job_id = %job_id, "executor event received");
                         let mut tasks = tasks.write().await;
@@ -552,9 +554,7 @@ impl Scheduler {
         }
     }
 
-    #[instrument(skip(self))]
     async fn send_event(&self, event: ChangeStateEvent) -> Result<()> {
-        debug!("send event");
         self.channel
             .send(event)
             .await
@@ -579,9 +579,8 @@ impl TaskScheduler for Scheduler {
     ///
     /// Returns [`TaskId`] of the scheduled task or [`Error::DuplicatedTaskId`] if the task with the same `TaskId`
     /// is already present, even if it's finished but not removed by getting its status or by garbage collector.
-    #[instrument(skip(self))]
     async fn add(&self, task: Task) -> Result<TaskId> {
-        debug!("add task");
+        debug!(task_id = %task.id(), "add task");
         let id = task.id();
         yield_now().await; // to avoid scheduling several tasks within a single async scheduler cycle
         if self.tasks.read().await.get(&id).is_some() {
@@ -596,9 +595,8 @@ impl TaskScheduler for Scheduler {
     /// the task can be killed or left to continue working up to finish.
     ///
     /// Returns [`Error::IncorrectTaskId`] if the task is not scheduled or cleaned by garbage collector.
-    #[instrument(skip(self))]
     async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()> {
-        debug!("cancel task");
+        debug!(task_id = %id, ?opts, "cancel task");
         self.send_event(ChangeStateEvent::DropTask(id, opts)).await
     }
 
@@ -606,16 +604,15 @@ impl TaskScheduler for Scheduler {
     ///
     /// If the task is finished, then its status will be removed from the scheduler after
     /// this method call, so the following calls with the same `TaskId` will fail with [`Error::IncorrectTaskId`].
-    #[instrument(skip(self))]
     async fn status(&self, id: &TaskId) -> Result<TaskStatus> {
-        debug!("task status requested");
+        debug!(task_id = %id, "task status requested");
         let mut tasks = self.tasks.write().await;
         let task = tasks.get_mut(id);
 
         if let Some(task) = task {
             let status = task.state.status();
             if task.state.finished() {
-                debug!("remove finished task");
+                debug!(task_id = %id, "remove finished task");
                 tasks.remove(id);
             }
             return Ok(status);
@@ -629,9 +626,8 @@ impl TaskScheduler for Scheduler {
     /// - shuts down executing engine with respect to [`ShutdownOpts`].
     ///
     /// Can return [`Error::IncompleteShutdown`] in case of errors.
-    #[instrument(skip(self))]
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
-        debug!("shutdown requested");
+        debug!(?opts, "shutdown requested");
         self.send_event(ChangeStateEvent::Shutdown(opts.clone()))
             .await?;
 
@@ -643,6 +639,7 @@ impl TaskScheduler for Scheduler {
                     .map_err(|_e| Error::IncompleteShutdown)?
             }
             ShutdownOpts::WaitFor(timeout) => {
+                debug!(?timeout, "wait for task completion");
                 select! {
                     res = self.handler => {
                         res.map_err(|_e| Error::IncompleteShutdown)?

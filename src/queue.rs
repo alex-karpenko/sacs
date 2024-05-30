@@ -76,11 +76,11 @@ impl QueueIndex {
         }
     }
 
-    #[instrument("clear_queue_indexes", skip(self))]
     fn clear(&mut self) {
         debug!(
             time_index_size = self.by_time.len(),
             id_index_size = self.by_id.len(),
+            "clear queue indexes"
         );
         self.by_time.clear();
         self.by_id.clear();
@@ -99,7 +99,6 @@ enum ChangeStateEvent {
 impl Queue {
     /// Helper method to remove event from the queue.
     /// It helps to avoid deadlocks during multiply remove operations.
-    #[instrument(skip(index))]
     async fn remove_event_from_index(
         event: &Event,
         index: &mut RwLockWriteGuard<'_, QueueIndex>,
@@ -109,7 +108,7 @@ impl Queue {
 
         // Event is present in both indexes - it's OK, remove it
         if ids.is_some() && times.is_some() {
-            debug!("remove event from indexes");
+            debug!(?event, "get next event");
             // Remove from time index
             let ids = index.by_time.get_mut(&event.time()).unwrap();
             ids.remove(&event.id());
@@ -129,11 +128,11 @@ impl Queue {
         } else if ids.is_none() && times.is_none() {
             // Event is absent in both indexes:
             // it's strange (we try to delete non-existent event), but this is not an error.
-            debug!("event not found");
+            debug!(?event, "event not found");
             return Ok(());
         } else {
             // There is some inconsistency in indexes - looks like a BUG
-            debug!("inconsistent indexes discovered");
+            debug!(?event, "inconsistent indexes discovered");
             return Err(Error::InconsistentQueueContent);
         }
     }
@@ -149,7 +148,7 @@ impl Default for Queue {
 }
 
 impl EventTimeQueue for Queue {
-    #[instrument(skip(self))]
+    #[instrument("waiting for queue event", skip_all)]
     async fn next(&self) -> Result<Event> {
         loop {
             // Calculate sleep time for next loop iteration
@@ -166,7 +165,7 @@ impl EventTimeQueue for Queue {
                         // Remove it from queue
                         Queue::remove_event_from_index(&event, &mut index).await?;
                         // And break loop returning event
-                        debug!(next_event_to_process = ?event);
+                        debug!(?event, "event is ready");
                         return Ok(event);
                     } else {
                         // Or calculate sleep time from now to the next event
@@ -177,13 +176,13 @@ impl EventTimeQueue for Queue {
                     Duration::from_secs(EMPTY_QUEUE_SLEEP_DURATION_SECONDS)
                 }
             };
-            debug!(next_event_delay = ?sleep_for);
 
             // Sleep but listen to the control channel
+            debug!(duration = ?sleep_for, "sleep until next event");
             select! {
                 biased;
                 control_event = self.control_channel.receive() => {
-                    debug!(control_event_received = ?control_event);
+                    debug!(event = ?control_event, "control event received");
                     if let Some(control_event) = control_event {
                         match control_event {
                             ChangeStateEvent::Shutdown => return Err(Error::ShutdownRequested),
@@ -198,9 +197,8 @@ impl EventTimeQueue for Queue {
         }
     }
 
-    #[instrument(skip(self))]
     async fn insert(&self, event: Event) -> Result<()> {
-        debug!("insert new event");
+        debug!(?event, "insert new event");
         {
             let mut index = self.index.write().await;
 
@@ -226,9 +224,8 @@ impl EventTimeQueue for Queue {
             .await
     }
 
-    #[instrument(skip(self))]
     async fn remove(&self, event: &Event) -> Result<()> {
-        debug!("remove event");
+        debug!(?event, "remove event");
         {
             let mut index = self.index.write().await;
             Queue::remove_event_from_index(event, &mut index).await?;
@@ -239,9 +236,8 @@ impl EventTimeQueue for Queue {
             .await
     }
 
-    #[instrument(skip(self))]
     async fn pop(&self, id: &EventId) -> Result<Vec<SystemTime>> {
-        debug!("purge all events");
+        debug!(event_id = ?id, "purge event instances");
         let mut return_times: Vec<SystemTime> = Vec::new();
         {
             let mut index = self.index.write().await;
@@ -267,12 +263,10 @@ impl EventTimeQueue for Queue {
         Ok(return_times)
     }
 
-    #[instrument(skip(self))]
     async fn shutdown(&self) {
-        debug!("clear queue");
+        debug!("shutdown requested");
         self.index.write().await.clear();
 
-        debug!("send shutdown event");
         let _result = self
             .control_channel
             .send_event(ChangeStateEvent::Shutdown)

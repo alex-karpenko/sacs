@@ -16,7 +16,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::sync::RwLock;
-use tracing::{debug, instrument};
+use tracing::debug;
 use uuid::Uuid;
 
 /// `Task` represents a single job with its schedule, attributes, and state.
@@ -508,43 +508,38 @@ impl TaskState {
         }
     }
 
-    #[instrument]
     pub(crate) fn enqueued(&mut self) -> &Self {
         self.waiting += 1;
-        debug!("status={:?}", self.status());
+        debug!(status = ?self.status(), "task enqueued");
         self
     }
 
-    #[instrument]
     pub(crate) fn scheduled(&mut self, id: JobId) -> &Self {
         self.waiting -= 1;
         self.scheduled += 1;
         self.scheduled_jobs.insert(id);
-        debug!("status={:?}", self.status());
+        debug!(status = ?self.status(), "task scheduled");
         self
     }
 
-    #[instrument]
     pub(crate) fn started(&mut self, id: JobId) -> &Self {
         self.scheduled -= 1;
         self.running += 1;
         self.scheduled_jobs.remove(&id);
         self.running_jobs.insert(id);
-        debug!("status={:?}", self.status());
+        debug!(status = ?self.status(), "task started");
         self
     }
 
-    #[instrument]
     pub(crate) fn completed(&mut self, id: &JobId) -> &Self {
         self.running -= 1;
         self.completed += 1;
         self.running_jobs.remove(id);
         self.last_finished_at = Some(SystemTime::now());
-        debug!("status={:?}", self.status());
+        debug!(status = ?self.status(), "task completed");
         self
     }
 
-    #[instrument]
     pub(crate) fn cancelled(&mut self, id: &JobId) -> &Self {
         self.cancelled += 1;
         if self.running_jobs.remove(id) {
@@ -554,7 +549,7 @@ impl TaskState {
             self.scheduled -= 1;
         }
         self.last_finished_at = Some(SystemTime::now());
-        debug!("status={:?}", self.status());
+        debug!(status = ?self.status(), "task canceled");
         self
     }
 

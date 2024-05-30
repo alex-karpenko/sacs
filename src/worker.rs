@@ -7,7 +7,7 @@ use crate::{
 use futures::future::select_all;
 use std::collections::HashMap;
 use tokio::{join, select, sync::mpsc::Sender, task::JoinHandle};
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 use uuid::Uuid;
 
 const WORKER_CONTROL_CHANNEL_SIZE: usize = 1024;
@@ -15,7 +15,7 @@ const WORKER_CONTROL_CHANNEL_SIZE: usize = 1024;
 pub trait AsyncWorker {
     /// Start one more job
     async fn start(&self, job: Job) -> Result<JobId>;
-    /// Cancel single running job
+    /// Cancel a single running job
     async fn cancel(&self, id: &JobId) -> Result<()>;
     /// Shutdown worker
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
@@ -29,7 +29,7 @@ enum ChangeStateEvent {
 }
 
 pub struct Worker {
-    tokio_handler: Option<tokio::task::JoinHandle<()>>,
+    tokio_handler: Option<JoinHandle<()>>,
     thread_handler: Option<std::thread::JoinHandle<()>>,
     channel: Sender<ChangeStateEvent>,
 }
@@ -39,7 +39,7 @@ impl Worker {
         let worker_channel = ControlChannel::<ChangeStateEvent>::new(WORKER_CONTROL_CHANNEL_SIZE);
         let worker_sender = worker_channel.sender();
 
-        debug!("new: type={:?}", type_);
+        debug!(worker_type = ?type_, "construct new worker");
         match type_ {
             WorkerType::CurrentRuntime => Self {
                 tokio_handler: Some(tokio::task::spawn(Self::worker(
@@ -85,16 +85,15 @@ impl Worker {
         }
     }
 
+    #[instrument("worker loop", skip_all)]
     async fn worker(
         executor_channel: Sender<ChangeExecutorStateEvent>,
         worker_channel: ControlChannel<ChangeStateEvent>,
     ) {
-        debug!("worker: start events loop");
-
         let mut ids: Vec<JobId> = Vec::new();
         let mut handlers: Vec<JoinHandle<()>> = Vec::new();
 
-        // Push single always-pending job to avoid panics on empty select_all
+        // Push a single always-pending job to avoid panics on empty select_all
         let fake_id = JobId::new(Uuid::new_v4());
         let fake_handler =
             tokio::task::spawn(Box::pin(async { futures::future::pending::<()>().await }));
@@ -106,7 +105,7 @@ impl Worker {
                 biased;
                 event = worker_channel.receive() => {
                     if let Some(event) = event {
-                        debug!("worker: event={:?}", event);
+                        debug!(?event, "event received");
                         match event {
                             ChangeStateEvent::StartJob(job) => {
                                 let id = job.id();
@@ -139,7 +138,6 @@ impl Worker {
                                 // Remove fake (forever pending) handler
                                 handlers.remove(0);
                                 if !handlers.is_empty() {
-                                    debug!("worker: shutdown with options={opts:?}");
                                     match opts {
                                         ShutdownOpts::IgnoreRunning => {},
                                         ShutdownOpts::CancelTasks(cancel_opts) => {
@@ -157,9 +155,9 @@ impl Worker {
                                         },
                                         ShutdownOpts::WaitFor(timeout) => {
                                             select! {
-                                                _ = futures::future::join_all(handlers) => { debug!("worker: completed shutdown with WaitFor option") },
-                                                _ = tokio::time::sleep(timeout) => { debug!("worker: timed out shutdown with WaitFor option") },
-                                            };
+                                                _ = futures::future::join_all(handlers) => { debug!("shutdown completed") },
+                                                _ = tokio::time::sleep(timeout) => { debug!("shutdown timed out") },
+                                            }
                                         },
                                     };
                                 }
@@ -167,14 +165,14 @@ impl Worker {
                             },
                         }
                     } else {
-                        warn!("worker: empty control channel, exiting");
+                        warn!("control channel error, exiting");
                         break
                     }
                 },
                 completed = select_all(&mut handlers.iter_mut()) => {
                     let (_, index, _) = completed;
                     let id = ids.get(index);
-                    debug!("worker: completed={:?}", id);
+                    debug!(job_id = ?id, "job completed");
                     if let Some(id) = id {
                         let id = id.clone();
                         ids.remove(index);
@@ -200,29 +198,30 @@ impl Worker {
 impl AsyncWorker for Worker {
     async fn start(&self, job: Job) -> Result<JobId> {
         let id = job.id();
+        debug!(job_id = %id, "start job");
         self.send_event(ChangeStateEvent::StartJob(job)).await?;
         Ok(id)
     }
 
     async fn cancel(&self, id: &JobId) -> Result<()> {
+        debug!(job_id = %id, "cancel job");
         self.send_event(ChangeStateEvent::CancelJob(id.clone()))
             .await
     }
 
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
+        debug!(?opts, "shutdown requested");
         self.send_event(ChangeStateEvent::Shutdown(opts.clone()))
             .await?;
 
-        // Define waiter func with respect to type of runtime thread
+        // Define waiter func with respect to the type of runtime thread
         let worker_waiter = async {
             if let Some(handler) = self.tokio_handler {
-                debug!("shutdown: waiting for async handler completion");
                 return futures::join!(handler)
                     .0
                     .map_err(|_e| Error::IncompleteShutdown);
             };
             if let Some(handler) = self.thread_handler {
-                debug!("shutdown: waiting for thread handler completion");
                 return handler.join().map_err(|_e| Error::IncompleteShutdown);
             };
             Ok(())
@@ -232,6 +231,7 @@ impl AsyncWorker for Worker {
             ShutdownOpts::IgnoreRunning => Ok(()),
             ShutdownOpts::CancelTasks(_) | ShutdownOpts::WaitForFinish => join!(worker_waiter).0,
             ShutdownOpts::WaitFor(timeout) => {
+                debug!(?timeout, "wait for jobs completion");
                 select! {
                     _ = tokio::time::sleep(timeout) => {Err(Error::IncompleteShutdown)},
                     result = worker_waiter => {result},

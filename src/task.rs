@@ -905,6 +905,11 @@ mod test {
             task.clone().with_schedule(TaskSchedule::Once).schedule(),
             TaskSchedule::Once
         );
+        assert_eq!(
+            task.clone().with_timeout(Duration::from_secs(10)).timeout(),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(task.clone().timeout(), None);
         assert_eq!(task.status(), TaskStatus::New);
 
         let id = Uuid::new_v4();

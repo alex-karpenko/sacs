@@ -1,6 +1,9 @@
 //! Contains primitive [`JobId`] which uniquely identifies executing `Task` instance.
 use crate::{task::TaskId, AsyncJobBoxed};
-use std::fmt::Display;
+use std::{
+    fmt::{Debug, Display},
+    time::Duration,
+};
 use uuid::Uuid;
 
 /// `JobId` uniquely identifies running instance of `Task`.
@@ -34,10 +37,10 @@ use uuid::Uuid;
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct JobId {
-    /// Unique ID of the running Job within particular `Task`.
-    pub id: Uuid,
     /// ID of the `Task` which owns this Job, is provided from `Scheduler` during scheduled starting of the `Task` instance.
     pub task_id: TaskId,
+    /// Unique ID of the running Job within particular `Task`.
+    pub id: Uuid,
 }
 
 impl JobId {
@@ -82,25 +85,33 @@ impl Display for JobId {
 pub(crate) struct Job {
     id: JobId,
     job: AsyncJobBoxed,
+    timeout: Option<Duration>,
 }
 
 impl Job {
-    pub fn new(id: JobId, job: AsyncJobBoxed) -> Self {
-        Self { id, job }
+    pub(crate) fn new(id: JobId, job: AsyncJobBoxed, timeout: Option<Duration>) -> Self {
+        Self { id, job, timeout }
     }
 
-    pub fn id(&self) -> JobId {
+    pub(crate) fn id(&self) -> JobId {
         self.id.clone()
     }
 
-    pub fn job(&self) -> AsyncJobBoxed {
+    pub(crate) fn job(&self) -> AsyncJobBoxed {
         self.job.clone()
+    }
+
+    pub(crate) fn timeout(&self) -> Option<Duration> {
+        self.timeout
     }
 }
 
-impl std::fmt::Debug for Job {
+impl Debug for Job {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Job").field("id", &self.id).finish()
+        f.debug_struct("Job")
+            .field("id", &self.id)
+            .field("timeout", &self.timeout)
+            .finish()
     }
 }
 
@@ -112,11 +123,12 @@ pub(crate) enum JobState {
     Running,
     Completed,
     Cancelled,
+    Timeouted,
 }
 
 impl JobState {
     pub fn finished(&self) -> bool {
-        *self == JobState::Completed || *self == JobState::Cancelled
+        *self == JobState::Completed || *self == JobState::Cancelled || *self == JobState::Timeouted
     }
 }
 
@@ -132,6 +144,7 @@ mod test {
         assert!(!JobState::Running.finished());
         assert!(JobState::Completed.finished());
         assert!(JobState::Cancelled.finished());
+        assert!(JobState::Timeouted.finished());
     }
 
     #[test]
@@ -154,15 +167,19 @@ mod test {
 
     #[test]
     fn debug_formatter() {
-        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {})).with_id("TEST");
-        let job = Job::new(JobId::new(task.id()), task.job);
+        let task1 = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {})).with_id("TEST");
+        let task2 = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {}))
+            .with_id("TEST_WITH_TIMEOUT")
+            .with_timeout(Duration::from_secs(1));
 
-        assert_eq!(
-            format!("{:?}", job),
-            format!(
-                "Job {{ id: JobId {{ id: {}, task_id: TaskId {{ id: \"TEST\" }} }} }}",
-                job.id().id
-            )
+        let job1 = Job::new(JobId::new(task1.id()), task1.job, None);
+        let job2 = Job::new(
+            JobId::new(task2.id()),
+            task2.job,
+            Some(Duration::from_secs(1)),
         );
+
+        assert_eq!(format!("{:?}", job1), format!("Job {{ id: JobId {{ task_id: TaskId {{ id: \"TEST\" }}, id: {} }}, timeout: None }}",job1.id().id));
+        assert_eq!(format!("{:?}", job2), format!("Job {{ id: JobId {{ task_id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, id: {} }}, timeout: Some(1s) }}", job2.id().id));
     }
 }

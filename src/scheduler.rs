@@ -480,7 +480,7 @@ impl Scheduler {
                         if let Some(task) = task {
                             let job_id = JobId::new(task.id());
                             let job = task.job.clone();
-                            let job = Job::new(job_id, job);
+                            let job = Job::new(job_id, job, task.timeout);
                             let job_id = executor.enqueue(job).await?;
                             jobs.insert(job_id.clone(), task.id.clone());
                             task.state.scheduled(job_id);
@@ -518,7 +518,11 @@ impl Scheduler {
                                             task.state.cancelled(&job_id);
                                             at = task.schedule.after_finish_run_time();
                                         },
-                                        _ => {},
+                                        JobState::Timeouted => {
+                                            task.state.timeouted(&job_id);
+                                            at = task.schedule.after_finish_run_time();
+                                        },
+                                        JobState::Pending | JobState::Starting => {},
                                     };
                                     if let Some(at) = at {
                                         let event_id = task.id.clone();
@@ -1166,20 +1170,30 @@ mod test {
                 tokio::time::sleep(Duration::from_secs(3)).await;
             })
         });
+        // Once work for 4s with 3s timeout
+        let task_4 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(4)).await;
+            })
+        })
+        .with_timeout(Duration::from_secs(3));
 
         let id_1 = scheduler.add(task_1).await.unwrap();
         let id_2 = scheduler.add(task_2).await.unwrap();
         let id_3 = scheduler.add(task_3).await.unwrap();
+        let id_4 = scheduler.add(task_4).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(2500)).await;
         assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
         assert!(scheduler.status(&id_2).await.is_err());
         assert_eq!(scheduler.status(&id_3).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id_4).await.unwrap(), TaskStatus::Running);
 
         tokio::time::sleep(Duration::from_millis(1000)).await;
         assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
         assert!(scheduler.status(&id_2).await.is_err());
         assert!(scheduler.status(&id_3).await.is_err());
+        assert!(scheduler.status(&id_4).await.is_err());
 
         scheduler
             .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
@@ -1264,5 +1278,62 @@ mod test {
                 _ => unreachable!("failed with unexpected error"),
             },
         }
+    }
+
+    #[tokio::test]
+    async fn task_with_timeout() {
+        let scheduler = Scheduler::default();
+
+        // Once work for 2s, with 5s timeout
+        let task1 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        })
+        .with_id("OK")
+        .with_timeout(Duration::from_secs(5));
+
+        // Once work for 2s, with 1s timeout
+        let task2 = task1
+            .clone()
+            .with_id("FAILED")
+            .with_timeout(Duration::from_secs(1));
+
+        // Every 1s, with 2s duration and 1s timeout
+        let task3 = Task::new(TaskSchedule::Interval(Duration::from_secs(1)), |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        })
+        .with_id("FAILING")
+        .with_timeout(Duration::from_secs(1));
+
+        let id1 = scheduler.add(task1).await.unwrap();
+        let id2 = scheduler.add(task2).await.unwrap();
+        let id3 = scheduler.add(task3).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id2).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Running);
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id2).await.unwrap(), TaskStatus::Finished);
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Waiting);
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Finished);
+        assert!(scheduler.status(&id2).await.is_err());
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Running);
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert!(scheduler.status(&id1).await.is_err());
+        assert!(scheduler.status(&id2).await.is_err());
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Waiting);
+
+        let _ = scheduler
+            .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
+            .await;
     }
 }

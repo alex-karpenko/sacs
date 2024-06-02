@@ -84,13 +84,14 @@ commit_preprocessors = [
 ]
 # regex for parsing and grouping commits
 commit_parsers = [
-  { message = "^.*: add", group = "Added" },
+  { message = "^.*: [Aa]dd", group = "Added" },
+  { message = "^.*: [Ii]mplement", group = "Added" },
   { message = "^.*: support", group = "Added" },
-  { message = "^.*: remove", group = "Removed" },
-  { message = "^.*: delete", group = "Removed" },
+  { message = "^.*: [Rr]emove", group = "Removed" },
+  { message = "^.*: [Dd]elete", group = "Removed" },
   { message = "^test", group = "Fixed" },
   { message = "^fix", group = "Fixed" },
-  { message = "^.*: fix", group = "Fixed" },
+  { message = "^.*: [Ff]ix", group = "Fixed" },
   { message = "^.*", group = "Changed" },
 ]
 # protect breaking changes from being skipped due to matching a skipping commit_parser

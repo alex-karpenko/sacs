@@ -609,7 +609,7 @@ impl TaskState {
         self.timeouted += 1;
         self.running_jobs.remove(id);
         self.last_finished_at = Some(SystemTime::now());
-        debug!("timeouted: status={:?}, {self:?}", self.status());
+        debug!(status = ?self.status(), "task timed out");
         self
     }
 

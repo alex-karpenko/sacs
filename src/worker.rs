@@ -34,6 +34,7 @@ pub struct Worker {
     channel: Sender<ChangeStateEvent>,
 }
 
+#[derive(Debug)]
 enum JobExecutionResult {
     Completed,
     Timeouted,
@@ -191,7 +192,7 @@ impl Worker {
                 completed = select_all(&mut handlers.iter_mut()) => {
                     let (result, index, _) = completed;
                     let id = ids.get(index);
-                    debug!(job_id = ?id, "job completed");
+
                     if let Some(id) = id {
                         let id = id.clone();
                         ids.remove(index);
@@ -200,16 +201,28 @@ impl Worker {
                         let job_completion_state = match result {
                             Ok(completion_result) => {
                                 match completion_result {
-                                    JobExecutionResult::Completed => ChangeExecutorStateEvent::JobCompleted(id),
-                                    JobExecutionResult::Timeouted => ChangeExecutorStateEvent::JobTimeouted(id),
+                                    JobExecutionResult::Completed => {
+                                        debug!(job_id = ?id, "job completed successfully");
+                                        ChangeExecutorStateEvent::JobCompleted(id)
+                                    },
+                                    JobExecutionResult::Timeouted => {
+                                        debug!(job_id = ?id, "job timed out and killed");
+                                        ChangeExecutorStateEvent::JobTimeouted(id)
+                                    },
                                 }
                             },
-                            Err(_) => ChangeExecutorStateEvent::JobCompleted(id), // TODO: introduce new state to reflect error
+                            Err(err) => {
+                                debug!(job_id = ?id, error = %err, "job finished with error");
+                                // TODO: introduce new state to reflect error
+                                ChangeExecutorStateEvent::JobCompleted(id)
+                            },
                         };
                         let _ = executor_channel
                             .send(job_completion_state)
                             .await
                             .map_err(|_e| Error::SendingChangeStateEvent);
+                    } else {
+                        debug!(?result, "unexpected job finished")
                     }
                 }
             }

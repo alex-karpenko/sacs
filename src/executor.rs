@@ -122,9 +122,9 @@ impl JobExecutor for Executor {
                             self.requeue_jobs().await?;
                             Ok(id)
                         },
-                        ChangeExecutorStateEvent::JobTimeouted(id) => {
+                        ChangeExecutorStateEvent::JobTimeout(id) => {
                             {
-                                self.jobs.write().await.state.insert(id.clone(), JobState::Timeouted);
+                                self.jobs.write().await.state.insert(id.clone(), JobState::Timeout);
                             }
                             self.requeue_jobs().await?;
                             Ok(id)
@@ -195,7 +195,7 @@ impl JobExecutor for Executor {
 pub(crate) enum ChangeExecutorStateEvent {
     JobStarted(JobId),
     JobCancelled(JobId),
-    JobTimeouted(JobId),
+    JobTimeout(JobId),
     JobCompleted(JobId),
 }
 

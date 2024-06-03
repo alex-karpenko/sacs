@@ -167,9 +167,11 @@ impl Task {
     /// Method consumes `Task` instance and returns the same instance with time constraint added.
     /// Since [`Task`] is cloneable, this method can be used to create several identical tasks with different limits.
     ///
-    /// Be careful: [`Task::clone()`] doesn't change `TaskId`, so it's your responsibility to ensure uniqueness of task's Id before
-    /// posting it to `Scheduler`. Anyway `Scheduler::add()` method rejects new `Task` if the same (with the same `TaskId`) is already present,
-    /// even if it's finished but not removed by getting it's status or by garbage collector.
+    /// Be careful: [`Task::clone()`] doesn't change `TaskId`,
+    /// so it's your responsibility to ensure the uniqueness of task's Id before
+    /// posting it to `Scheduler`.
+    /// Anyway, `Scheduler::add()` method rejects new `Task` if the same (with the same `TaskId`) is already present,
+    /// even if it's finished but not removed by getting its status or by garbage collector.
     ///
     /// # Examples:
     ///
@@ -505,7 +507,7 @@ pub enum TaskStatus {
     Scheduled,
     /// It works right now.
     Running,
-    /// All jobs of the task have been finished (completed, cancelled or timeouted) and no more jobs will be scheduled anymore.
+    /// All jobs of the task have been finished (completed, canceled or timed out), and no more jobs will be scheduled anymore.
     Finished,
 }
 
@@ -516,7 +518,7 @@ pub(crate) struct TaskState {
     running: usize,
     completed: usize,
     cancelled: usize,
-    timeouted: usize,
+    timeout: usize,
     scheduled_jobs: BTreeSet<JobId>,
     running_jobs: BTreeSet<JobId>,
     last_finished_at: Option<SystemTime>,
@@ -536,7 +538,7 @@ impl std::fmt::Debug for TaskState {
             .field("running", &self.running)
             .field("completed", &self.completed)
             .field("cancelled", &self.cancelled)
-            .field("timeouted", &self.timeouted)
+            .field("timeout", &self.timeout)
             .field("scheduled_jobs", &self.scheduled_jobs)
             .field("running_jobs", &self.running_jobs)
             .field("last_finished_at", &last_finished_at)
@@ -552,7 +554,7 @@ impl TaskState {
             TaskStatus::Scheduled
         } else if self.waiting > 0 {
             TaskStatus::Waiting
-        } else if (self.completed + self.cancelled + self.timeouted) > 0 {
+        } else if (self.completed + self.cancelled + self.timeout) > 0 {
             TaskStatus::Finished
         } else {
             TaskStatus::New
@@ -604,9 +606,9 @@ impl TaskState {
         self
     }
 
-    pub(crate) fn timeouted(&mut self, id: &JobId) -> &Self {
+    pub(crate) fn timeout(&mut self, id: &JobId) -> &Self {
         self.running -= 1;
-        self.timeouted += 1;
+        self.timeout += 1;
         self.running_jobs.remove(id);
         self.last_finished_at = Some(SystemTime::now());
         debug!(status = ?self.status(), "task timed out");
@@ -617,7 +619,7 @@ impl TaskState {
         self.waiting == 0
             && self.scheduled == 0
             && self.running == 0
-            && (self.completed + self.cancelled + self.timeouted) > 0
+            && (self.completed + self.cancelled + self.timeout) > 0
             && self.scheduled_jobs.is_empty()
             && self.running_jobs.is_empty()
     }
@@ -774,43 +776,43 @@ mod test {
         assert_eq!(state.status(), TaskStatus::New);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
+        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
 
         state.enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 1, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
+        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 1, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
 
         state.enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 2, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
+        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 2, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
 
         state.enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 3, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
+        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 3, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
 
         state.scheduled(job1.clone());
         assert_eq!(state.status(), TaskStatus::Scheduled);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 2, scheduled: 1, running: 0, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, running_jobs: {{}}, last_finished_at: \"None\" }}", job1.id.to_string()));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 2, scheduled: 1, running: 0, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, running_jobs: {{}}, last_finished_at: \"None\" }}", job1.id.to_string()));
 
         state.started(job1.clone());
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 2, scheduled: 0, running: 1, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {{}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, last_finished_at: \"None\" }}", job1.id.to_string()));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 2, scheduled: 0, running: 1, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {{}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, last_finished_at: \"None\" }}", job1.id.to_string()));
 
         state.scheduled(job2.clone());
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 1, scheduled: 1, running: 1, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 2 id\" }}, id: {} }}}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, last_finished_at: \"None\" }}", job2.id.to_string(), job1.id.to_string()));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 1, scheduled: 1, running: 1, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 2 id\" }}, id: {} }}}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, last_finished_at: \"None\" }}", job2.id.to_string(), job1.id.to_string()));
 
         let jobs = state.jobs();
         let expected = BTreeSet::<JobId>::from([job1.clone(), job2.clone()]);
@@ -820,7 +822,7 @@ mod test {
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 2, running: 1, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 2 id\" }}, id: {} }}, JobId {{ task_id: TaskId {{ id: \"task 3 id\" }}, id: {} }}}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, last_finished_at: \"None\" }}", job2.id.to_string(), job3.id.to_string(), job1.id.to_string()));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 2, running: 1, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 2 id\" }}, id: {} }}, JobId {{ task_id: TaskId {{ id: \"task 3 id\" }}, id: {} }}}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, last_finished_at: \"None\" }}", job2.id.to_string(), job3.id.to_string(), job1.id.to_string()));
 
         let jobs = state.jobs();
         let expected = BTreeSet::<JobId>::from([job1.clone(), job2.clone(), job3.clone()]);
@@ -830,7 +832,7 @@ mod test {
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 1, running: 2, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 2 id\" }}, id: {} }}}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}, JobId {{ task_id: TaskId {{ id: \"task 3 id\" }}, id: {} }}}}, last_finished_at: \"None\" }}", job2.id.to_string(), job1.id.to_string(), job3.id.to_string()));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 1, running: 2, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 2 id\" }}, id: {} }}}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}, JobId {{ task_id: TaskId {{ id: \"task 3 id\" }}, id: {} }}}}, last_finished_at: \"None\" }}", job2.id.to_string(), job1.id.to_string(), job3.id.to_string()));
 
         let jobs = state.jobs();
         let expected = BTreeSet::<JobId>::from([job1.clone(), job2.clone(), job3.clone()]);
@@ -840,17 +842,17 @@ mod test {
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_some());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 2, completed: 0, cancelled: 1, timeouted: 0, scheduled_jobs: {{}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}, JobId {{ task_id: TaskId {{ id: \"task 3 id\" }}, id: {} }}}}, last_finished_at: \"{}\" }}", job1.id.to_string(), job3.id.to_string(), DateTime::<Local>::from(state.last_finished_at().unwrap())));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 2, completed: 0, cancelled: 1, timeout: 0, scheduled_jobs: {{}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}, JobId {{ task_id: TaskId {{ id: \"task 3 id\" }}, id: {} }}}}, last_finished_at: \"{}\" }}", job1.id.to_string(), job3.id.to_string(), DateTime::<Local>::from(state.last_finished_at().unwrap())));
 
         let jobs = state.jobs();
         let expected = BTreeSet::<JobId>::from([job1.clone(), job3.clone()]);
         assert_eq!(jobs, expected);
 
-        state.timeouted(&job3);
+        state.timeout(&job3);
         assert_eq!(state.status(), TaskStatus::Running);
         assert!(!state.finished());
         assert!(state.last_finished_at().is_some());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 1, completed: 0, cancelled: 1, timeouted: 1, scheduled_jobs: {{}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, last_finished_at: \"{}\" }}", job1.id.to_string(), DateTime::<Local>::from(state.last_finished_at().unwrap())));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 1, completed: 0, cancelled: 1, timeout: 1, scheduled_jobs: {{}}, running_jobs: {{JobId {{ task_id: TaskId {{ id: \"task 1 id\" }}, id: {} }}}}, last_finished_at: \"{}\" }}", job1.id.to_string(), DateTime::<Local>::from(state.last_finished_at().unwrap())));
 
         let jobs = state.jobs();
         let expected = BTreeSet::<JobId>::from([job1.clone()]);
@@ -860,7 +862,7 @@ mod test {
         assert_eq!(state.status(), TaskStatus::Finished);
         assert!(state.finished());
         assert!(state.last_finished_at().is_some());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 1, cancelled: 1, timeouted: 1, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"{}\" }}", DateTime::<Local>::from(state.last_finished_at().unwrap())));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 1, cancelled: 1, timeout: 1, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"{}\" }}", DateTime::<Local>::from(state.last_finished_at().unwrap())));
 
         let jobs = state.jobs();
         let expected = BTreeSet::<JobId>::new();
@@ -949,8 +951,8 @@ mod test {
             .with_id("TEST_WITH_TIMEOUT")
             .with_timeout(Duration::from_secs(1));
 
-        assert_eq!(format!("{:?}", task1), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: None }}"));
-        assert_eq!(format!("{:?}", task2), format!("Task {{ id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeouted: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: Some(1s) }}"));
+        assert_eq!(format!("{:?}", task1), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: None }}"));
+        assert_eq!(format!("{:?}", task2), format!("Task {{ id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, timeout: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: Some(1s) }}"));
 
         assert_eq!(
             format!("{}", CronSchedule::try_from("1 2 3 4 5").unwrap()),

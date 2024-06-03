@@ -528,8 +528,8 @@ impl Scheduler {
                                             task.state.cancelled(&job_id);
                                             at = task.schedule.after_finish_run_time();
                                         },
-                                        JobState::Timeouted => {
-                                            task.state.timeouted(&job_id);
+                                        JobState::Timeout => {
+                                            task.state.timeout(&job_id);
                                             at = task.schedule.after_finish_run_time();
                                         },
                                         JobState::Pending | JobState::Starting => {},

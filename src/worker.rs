@@ -37,7 +37,7 @@ pub struct Worker {
 #[derive(Debug)]
 enum JobExecutionResult {
     Completed,
-    Timeouted,
+    Timeout,
 }
 
 impl Worker {
@@ -125,7 +125,7 @@ impl Worker {
                                     let handler = tokio::task::spawn(Box::pin(async move {
                                         select! {
                                             _ = job_to_run => {JobExecutionResult::Completed},
-                                            _ = tokio::time::sleep(timeout) => {JobExecutionResult::Timeouted}
+                                            _ = tokio::time::sleep(timeout) => {JobExecutionResult::Timeout}
                                             }
                                         }
                                     ));
@@ -205,9 +205,9 @@ impl Worker {
                                         debug!(job_id = ?id, "job completed successfully");
                                         ChangeExecutorStateEvent::JobCompleted(id)
                                     },
-                                    JobExecutionResult::Timeouted => {
+                                    JobExecutionResult::Timeout => {
                                         debug!(job_id = ?id, "job timed out and killed");
-                                        ChangeExecutorStateEvent::JobTimeouted(id)
+                                        ChangeExecutorStateEvent::JobTimeout(id)
                                     },
                                 }
                             },

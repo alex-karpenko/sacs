@@ -2,11 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.5.1] - 2024-05-31
+## [0.5.1] - 2024-06-03
 ### Details
 #### Added
 - Add auto changelog generation to release workflows by @alex-karpenko in [#14](https://github.com/alex-karpenko/sacs/pull/14)
-- Add basic tracing
+- Add basic tracing by @alex-karpenko in [#16](https://github.com/alex-karpenko/sacs/pull/16)
 
 ## [0.5.0] - 2024-05-07
 ### Details

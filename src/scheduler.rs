@@ -7,7 +7,7 @@ use crate::{
     executor::{Executor, JobExecutor},
     job::{Job, JobId, JobState},
     queue::{EventTimeQueue, Queue},
-    task::{Task, TaskId, TaskStatus},
+    task::{Task, TaskId, TaskStatistics, TaskStatus},
     ControlChannel, Error, Result,
 };
 use std::{
@@ -35,6 +35,8 @@ pub trait TaskScheduler {
     async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()>;
     /// Returns current status of the [`Task`] and removes the task from the scheduler if it's finished.
     async fn status(&self, id: &TaskId) -> Result<TaskStatus>;
+    /// Returns various statistics about the [`Task`] state. Please refer to the [`TaskStatistics`] for details.
+    async fn statistics(&self, id: &TaskId) -> Result<TaskStatistics>;
     /// Shuts down the scheduler with respect to [`ShutdownOpts`].
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
 }
@@ -52,6 +54,11 @@ pub trait TaskScheduler {
     ) -> impl std::future::Future<Output = Result<()>> + Send;
     /// Returns current status of the [`Task`] and removes the task from the scheduler if it's finished.
     fn status(&self, id: &TaskId) -> impl std::future::Future<Output = Result<TaskStatus>> + Send;
+    /// Returns various statistics about the [`Task`] state. Please refer to the [`TaskStatistics`] for details.
+    fn statistics(
+        &self,
+        id: &TaskId,
+    ) -> impl std::future::Future<Output = Result<TaskStatistics>> + Send;
     /// Shuts down the scheduler with respect to [`ShutdownOpts`].
     fn shutdown(self, opts: ShutdownOpts) -> impl std::future::Future<Output = Result<()>> + Send;
 }
@@ -271,7 +278,7 @@ impl GarbageCollector {
 
         let to_remove: Vec<TaskId> = tasks
             .iter()
-            .filter(|(_id, task)| task.state.finished())
+            .filter(|(_id, task)| task.state.is_task_finished())
             .filter(|(_id, task)| {
                 task.state
                     .last_finished_at()
@@ -455,7 +462,7 @@ impl Scheduler {
                                 let task_id = task.id.clone();
                                 let at = task.schedule.initial_run_time();
                                 queue.insert(Event::new(event_id, at)).await?;
-                                task.state.enqueued();
+                                task.state.task_enqueued();
                                 let mut tasks = tasks.write().await;
                                 tasks.insert(task_id, task);
                             },
@@ -493,12 +500,12 @@ impl Scheduler {
                             let job = Job::new(job_id, job, task.timeout);
                             let job_id = executor.enqueue(job).await?;
                             jobs.insert(job_id.clone(), task.id.clone());
-                            task.state.scheduled(job_id);
+                            task.state.job_scheduled(job_id);
                             let at = task.schedule.after_start_run_time();
                             if let Some(at) = at {
                                 let event_id = task.id.clone();
                                 queue.insert(Event::new(event_id, at)).await?;
-                                task.state.enqueued();
+                                task.state.task_enqueued();
                             }
                         }
                         } else {
@@ -519,17 +526,21 @@ impl Scheduler {
                                     debug!(job_state = ?job_state, "job state changed");
                                     let mut at = None;
                                     match job_state {
-                                        JobState::Running => { task.state.started(job_id); },
+                                        JobState::Running => { task.state.job_started(job_id); },
                                         JobState::Completed => {
-                                            task.state.completed(&job_id);
+                                            task.state.job_completed(&job_id);
                                             at = task.schedule.after_finish_run_time();
                                         },
-                                        JobState::Cancelled => {
-                                            task.state.cancelled(&job_id);
+                                        JobState::Canceled => {
+                                            task.state.job_canceled(&job_id);
                                             at = task.schedule.after_finish_run_time();
                                         },
                                         JobState::Timeout => {
-                                            task.state.timeout(&job_id);
+                                            task.state.job_timeout(&job_id);
+                                            at = task.schedule.after_finish_run_time();
+                                        },
+                                        JobState::Error => {
+                                            task.state.job_error(&job_id);
                                             at = task.schedule.after_finish_run_time();
                                         },
                                         JobState::Pending | JobState::Starting => {},
@@ -537,9 +548,9 @@ impl Scheduler {
                                     if let Some(at) = at {
                                         let event_id = task.id.clone();
                                         queue.insert(Event::new(event_id, at)).await?;
-                                        task.state.enqueued();
+                                        task.state.task_enqueued();
                                     }
-                                    task.state.finished()
+                                    task.state.is_task_finished()
                                 } else {
                                     false
                                 }
@@ -615,7 +626,7 @@ impl TaskScheduler for Scheduler {
 
         if let Some(task) = task {
             let status = task.state.status();
-            if task.state.finished() {
+            if task.state.is_task_finished() {
                 debug!(task_id = %id, "remove finished task");
                 tasks.remove(id);
             }
@@ -623,6 +634,22 @@ impl TaskScheduler for Scheduler {
         }
 
         Err(Error::IncorrectTaskId(id.clone()))
+    }
+
+    /// Returns various statistics about scheduled the task.
+    ///
+    /// Please refer to the [`TaskStatistics`] documentation for details.
+    /// Returns [`Error::IncorrectTaskId`] if the task is not scheduled or cleaned by garbage collector.
+    async fn statistics(&self, id: &TaskId) -> Result<TaskStatistics> {
+        debug!(task_id = %id, "task statistics requested");
+        let tasks = self.tasks.read().await;
+        let task = tasks.get(id);
+
+        if let Some(task) = task {
+            Ok(task.statistics())
+        } else {
+            Err(Error::IncorrectTaskId(id.clone()))
+        }
     }
 
     /// Starts process of scheduler shutdown:

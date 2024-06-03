@@ -149,7 +149,7 @@ impl Worker {
                                     let handler = handlers.remove(index);
                                     handler.abort();
                                     let _ = executor_channel
-                                        .send(ChangeExecutorStateEvent::JobCancelled(id))
+                                        .send(ChangeExecutorStateEvent::JobCanceled(id))
                                         .await
                                         .map_err(|_e| Error::SendingChangeStateEvent);
                                 }
@@ -206,15 +206,14 @@ impl Worker {
                                         ChangeExecutorStateEvent::JobCompleted(id)
                                     },
                                     JobExecutionResult::Timeout => {
-                                        debug!(job_id = ?id, "job timed out and killed");
+                                        debug!(job_id = ?id, "job killed because timeout");
                                         ChangeExecutorStateEvent::JobTimeout(id)
                                     },
                                 }
                             },
-                            Err(err) => {
-                                debug!(job_id = ?id, error = %err, "job finished with error");
-                                // TODO: introduce new state to reflect error
-                                ChangeExecutorStateEvent::JobCompleted(id)
+                            Err(error) => {
+                                debug!(job_id = ?id, %error, "job finished with error");
+                                ChangeExecutorStateEvent::JobError(id)
                             },
                         };
                         let _ = executor_channel

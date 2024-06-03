@@ -2,6 +2,7 @@ use crate::{
     event::{Event, EventId},
     ControlChannel, Error, Result,
 };
+use std::fmt::Debug;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     time::SystemTime,
@@ -11,7 +12,7 @@ use tokio::{
     sync::{RwLock, RwLockWriteGuard},
     time::{sleep, Duration},
 };
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Default size of Queue control channel
 const QUEUE_CONTROL_CHANNEL_SIZE: usize = 1024;
@@ -19,7 +20,7 @@ const QUEUE_CONTROL_CHANNEL_SIZE: usize = 1024;
 const EMPTY_QUEUE_SLEEP_DURATION_SECONDS: u64 = 60 * 60;
 
 /// Events queue behavior
-pub trait EventTimeQueue {
+pub trait EventTimeQueue: Debug {
     /// Blocks execution until next event time.
     /// Returns Result with event and remove it from queue.
     async fn next(&self) -> Result<Event>;
@@ -53,6 +54,7 @@ pub trait EventTimeQueue {
 }
 
 /// Simple (but enough) implementation of EventTimeQueue
+#[derive(Debug)]
 pub(crate) struct Queue {
     // Indexes of events by id and time
     index: RwLock<QueueIndex>,
@@ -60,6 +62,7 @@ pub(crate) struct Queue {
     control_channel: ControlChannel<ChangeStateEvent>,
 }
 
+#[derive(Debug)]
 struct QueueIndex {
     by_time: BTreeMap<SystemTime, BTreeSet<EventId>>,
     by_id: HashMap<EventId, BTreeSet<SystemTime>>,
@@ -74,7 +77,11 @@ impl QueueIndex {
     }
 
     fn clear(&mut self) {
-        debug!("clear: clearing queue indexes");
+        debug!(
+            time_index_size = self.by_time.len(),
+            id_index_size = self.by_id.len(),
+            "clear queue indexes"
+        );
         self.by_time.clear();
         self.by_id.clear();
     }
@@ -91,7 +98,7 @@ enum ChangeStateEvent {
 
 impl Queue {
     /// Helper method to remove event from the queue.
-    /// It helps to avoid dead-locks during multiply remove operations.
+    /// It helps to avoid deadlocks during multiply remove operations.
     async fn remove_event_from_index(
         event: &Event,
         index: &mut RwLockWriteGuard<'_, QueueIndex>,
@@ -101,6 +108,7 @@ impl Queue {
 
         // Event is present in both indexes - it's OK, remove it
         if ids.is_some() && times.is_some() {
+            debug!(?event, "get next event");
             // Remove from time index
             let ids = index.by_time.get_mut(&event.time()).unwrap();
             ids.remove(&event.id());
@@ -117,11 +125,14 @@ impl Queue {
             }
 
             Ok(())
-        // Event is absent in both indexes - it's strange (we try to delete non-existent event) but this's not an error
         } else if ids.is_none() && times.is_none() {
+            // Event is absent in both indexes:
+            // it's strange (we try to delete non-existent event), but this is not an error.
+            debug!(?event, "event not found");
             return Ok(());
-        // There is some inconsistency in indexes - looks like a BUG
         } else {
+            // There is some inconsistency in indexes - looks like a BUG
+            debug!(?event, "inconsistent indexes discovered");
             return Err(Error::InconsistentQueueContent);
         }
     }
@@ -137,6 +148,7 @@ impl Default for Queue {
 }
 
 impl EventTimeQueue for Queue {
+    #[instrument("waiting for queue event", skip_all)]
     async fn next(&self) -> Result<Event> {
         loop {
             // Calculate sleep time for next loop iteration
@@ -146,17 +158,17 @@ impl EventTimeQueue for Queue {
                 if let Some((top_time, top_ids)) = index.by_time.first_key_value() {
                     let now = SystemTime::now();
                     if now >= *top_time {
-                        // Construct event from top of the queue id/time
-                        // Get first id from the list if there is many ids
+                        // Construct event from the top of the queue id/time
+                        // Get first id from the list if there are many ids
                         let event =
                             Event::new(top_ids.first().unwrap().clone(), top_time.to_owned());
                         // Remove it from queue
                         Queue::remove_event_from_index(&event, &mut index).await?;
                         // And break loop returning event
-                        debug!("next: event to process={:?}", event);
+                        debug!(?event, "event is ready");
                         return Ok(event);
                     } else {
-                        // Or calculate sleep time from now to next event
+                        // Or calculate sleep time from now to the next event
                         top_time.duration_since(now)?
                     }
                 } else {
@@ -164,29 +176,29 @@ impl EventTimeQueue for Queue {
                     Duration::from_secs(EMPTY_QUEUE_SLEEP_DURATION_SECONDS)
                 }
             };
-            debug!("next: next event in {:?}", sleep_for);
 
             // Sleep but listen to the control channel
+            debug!(duration = ?sleep_for, "sleep until next event");
             select! {
                 biased;
                 control_event = self.control_channel.receive() => {
-                    debug!("next: control event received={:?}", control_event);
+                    debug!(event = ?control_event, "control event received");
                     if let Some(control_event) = control_event {
                         match control_event {
                             ChangeStateEvent::Shutdown => return Err(Error::ShutdownRequested),
-                            // Just run loop from the beginning
+                            // Run loop from the beginning
                             ChangeStateEvent::QueueUpdated => {},
                         }
                     }
                 },
-                // Just run loop from the beginning
+                // Run loop from the beginning
                 _ = sleep(sleep_for) => {},
             }
         }
     }
 
     async fn insert(&self, event: Event) -> Result<()> {
-        debug!("insert: {:?}", event);
+        debug!(?event, "insert new event");
         {
             let mut index = self.index.write().await;
 
@@ -213,7 +225,7 @@ impl EventTimeQueue for Queue {
     }
 
     async fn remove(&self, event: &Event) -> Result<()> {
-        debug!("remove: {:?}", event);
+        debug!(?event, "remove event");
         {
             let mut index = self.index.write().await;
             Queue::remove_event_from_index(event, &mut index).await?;
@@ -225,13 +237,13 @@ impl EventTimeQueue for Queue {
     }
 
     async fn pop(&self, id: &EventId) -> Result<Vec<SystemTime>> {
-        debug!("pop: {:?}", id);
+        debug!(event_id = ?id, "purge event instances");
         let mut return_times: Vec<SystemTime> = Vec::new();
         {
             let mut index = self.index.write().await;
             let event_times = index.by_id.get_mut(id);
             if let Some(event_times) = event_times {
-                debug!("pop: {:?}: {} events to purge", id, event_times.len());
+                debug!(events_to_purge = event_times.len());
                 // Loop over event's times and remove each one
                 // But preserve list of times to return it
                 return_times = event_times.iter().copied().collect();
@@ -252,11 +264,9 @@ impl EventTimeQueue for Queue {
     }
 
     async fn shutdown(&self) {
-        debug!("shutdown: requested");
-        {
-            let mut index = self.index.write().await;
-            index.clear();
-        }
+        debug!("shutdown requested");
+        self.index.write().await.clear();
+
         let _result = self
             .control_channel
             .send_event(ChangeStateEvent::Shutdown)
@@ -341,7 +351,7 @@ mod test {
         set_exp.insert(event_2_0s);
         assert_eq!(set_exp, set_got);
 
-        // Remove first event when 2nd later is present
+        // Remove the first event when 2nd later is present
         queue.insert(event_1s.clone()).await.unwrap();
         queue.insert(event_2s.clone()).await.unwrap();
         let remove_1s = async {
@@ -391,18 +401,21 @@ mod test {
 
     #[tokio::test]
     async fn shutdown() {
+        async fn get_next_event(queue: &Queue) -> Option<Result<Event>> {
+            select! {
+                e = queue.next() => { Some(e) },
+                _ = async {
+                    sleep(Duration::from_millis(500)).await;
+                    queue.shutdown().await;
+                    sleep(Duration::from_millis(1000)).await;
+                } => { None },
+            }
+        }
+
         let queue = Queue::default();
 
         // Shutdown on empty queue
-        let next = select! {
-            e = queue.next() => { Some(e) },
-            _ = async {
-                sleep(Duration::from_millis(500)).await;
-                queue.shutdown().await;
-                sleep(Duration::from_millis(1000)).await;
-            } => { None },
-        };
-
+        let next = get_next_event(&queue).await;
         assert!(next.is_some());
         let next = next.unwrap();
         assert!(matches!(next, Err(Error::ShutdownRequested)));
@@ -415,14 +428,7 @@ mod test {
             time.checked_add(Duration::from_secs(1)).unwrap(),
         );
         queue.insert(event_1s.clone()).await.unwrap();
-        let next = select! {
-            e = queue.next() => { Some(e) },
-            _ = async {
-                sleep(Duration::from_millis(500)).await;
-                queue.shutdown().await;
-                sleep(Duration::from_millis(1000)).await;
-            } => { None },
-        };
+        let next = get_next_event(&queue).await;
 
         assert!(next.is_some());
         let next = next.unwrap();

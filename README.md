@@ -6,11 +6,11 @@
 <a href="https://github.com/alex-karpenko/sacs/actions/workflows/ci.yaml" rel="nofollow"><img src="https://img.shields.io/github/actions/workflow/status/alex-karpenko/sacs/ci.yaml?label=ci" alt="CI status"></a>
 <a href="https://github.com/alex-karpenko/sacs/actions/workflows/audit.yaml" rel="nofollow"><img src="https://img.shields.io/github/actions/workflow/status/alex-karpenko/sacs/audit.yaml?label=audit" alt="Audit status"></a>
 <a href="https://github.com/alex-karpenko/sacs/actions/workflows/publish.yaml" rel="nofollow"><img src="https://img.shields.io/github/actions/workflow/status/alex-karpenko/sacs/publish.yaml?label=publish" alt="Crates.io publishing status"></a>
-<a href="https://crates.io/crates/sacs" rel="nofollow"><img src="https://img.shields.io/crates/v/sacs" alt="Version at Crates.io"></a>
 <a href="https://docs.rs/sacs" rel="nofollow"><img src="https://img.shields.io/docsrs/sacs" alt="docs.rs status"></a>
+<a href="https://crates.io/crates/sacs" rel="nofollow"><img src="https://img.shields.io/crates/v/sacs" alt="Version at Crates.io"></a>
+<a href="https://crates.io/crates/sacs" rel="nofollow"><img alt="Crates.io MSRV" src="https://img.shields.io/crates/msrv/sacs"></a>
 <a href="https://github.com/alex-karpenko/sacs/blob/HEAD/LICENSE" rel="nofollow"><img src="https://img.shields.io/crates/l/sacs" alt="License"></a>
 </p>
-<!-- ![Crates.io MSRV](https://img.shields.io/crates/msrv/sacs) -->
 
 ## Features
 
@@ -70,8 +70,9 @@ async fn main() -> Result<()> {
 - [x] Make [`TaskId`](https://docs.rs/sacs/latest/sacs/task/struct.TaskId.html) and
 [`JobId`](https://docs.rs/sacs/latest/sacs/job/struct.JobId.html) more flexible and
 convenient to create and refer tasks.
+- [x] Tracing.
+- [ ] Task with limited execution time.
 - [ ] More examples.
-- [ ] Tracing.
 
 ## License
 

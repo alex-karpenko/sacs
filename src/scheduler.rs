@@ -1,4 +1,4 @@
-//! [`Scheduler`] is the most essential structure of `SACS`, it's heart.
+//! [`Scheduler`] is the most essential structure of `SACS`, its heart.
 //! This is an entry point to schedule tasks and control on tasks and on whole jobs runtime.
 //!
 //! All other module's content works for [`Scheduler`].
@@ -20,7 +20,7 @@ use tokio::{
     sync::{mpsc::Sender, RwLock},
     task::yield_now,
 };
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 /// Default maximin number of jobs to run on the single worker
 pub(crate) const DEFAULT_MAX_PARALLEL_JOBS: usize = 16;
@@ -33,7 +33,7 @@ pub trait TaskScheduler {
     async fn add(&self, task: Task) -> Result<TaskId>;
     /// Cancels existing [`Task`] with respect to [`CancelOpts`].
     async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()>;
-    /// Returns current status of the [`Task`] and removes task from the scheduler if it's finished.
+    /// Returns current status of the [`Task`] and removes the task from the scheduler if it's finished.
     async fn status(&self, id: &TaskId) -> Result<TaskStatus>;
     /// Shuts down the scheduler with respect to [`ShutdownOpts`].
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
@@ -50,7 +50,7 @@ pub trait TaskScheduler {
         id: TaskId,
         opts: CancelOpts,
     ) -> impl std::future::Future<Output = Result<()>> + Send;
-    /// Returns current status of the [`Task`] and removes task from the scheduler if it's finished.
+    /// Returns current status of the [`Task`] and removes the task from the scheduler if it's finished.
     fn status(&self, id: &TaskId) -> impl std::future::Future<Output = Result<TaskStatus>> + Send;
     /// Shuts down the scheduler with respect to [`ShutdownOpts`].
     fn shutdown(self, opts: ShutdownOpts) -> impl std::future::Future<Output = Result<()>> + Send;
@@ -60,17 +60,17 @@ pub trait TaskScheduler {
 ///
 /// ## Overview
 ///
-/// [`Scheduler`] runs as independent `Tokio` task (so you don't need to pool it using await/select/join), and it's responsible on:
+/// [`Scheduler`] runs as independent `Tokio` task (so you don't need to pool it using await/select/join), and it's responsible for:
 /// - provisioning new and removing existing tasks on request
 /// - starting jobs according to the task's schedule
 /// - collecting and providing task's status
 /// - clean scheduler's state from orphaned task's data
 /// - shutdown
 ///
-/// [`Scheduler`] uses some kind of it's own "executor" engine under the hood to start jobs on `Tokio` runtime with respect
-/// to provided constrains: runtime type, number of threads and parallelism (maximum number of simultaneously running jobs).
+/// [`Scheduler`] uses some kind of its own "executor" engine under the hood to start jobs on `Tokio` runtime with respect
+/// to provided constraints: runtime type, number of threads and parallelism (maximum number of simultaneously running jobs).
 ///
-/// New scheduler can be created using convenient [SchedulerBuilder] or using [`Scheduler::default()`] method or using long version
+/// New scheduler can be created using convenient [SchedulerBuilder] or using [`Scheduler::default()`] method or using a long version
 /// of the trivial constructor [`Scheduler::new()`]
 ///
 /// Each [`Scheduler`] has at least three configuration parameters:
@@ -118,9 +118,9 @@ pub trait TaskScheduler {
 /// ```
 ///
 /// Use separate `MultiThread` `Tokio` runtime with:
-/// - 4 threads
+/// - four threads
 /// - unlimited number of jobs
-/// - garbage collector with 12 hours expiration time, run it every 15 minutes
+/// - garbage collector with 12-hour expiration time, run it every 15 minutes
 /// ```
 /// use sacs::{
 ///     scheduler::{GarbageCollector, RuntimeThreads, Scheduler, SchedulerBuilder,
@@ -165,22 +165,23 @@ pub enum WorkerType {
     /// Use current runtime instead of creating new one.
     ///
     /// This is the simplest and lightest worker because it uses runtime of the calling context.
-    /// This is default type.
+    /// This is a default type.
     #[default]
     CurrentRuntime,
     /// Creates new thread and runs new `Tokio` runtime of `CurrentThread` type. Single thread worker.
     CurrentThread,
     /// Creates new thread and runs new `Tokio` runtime of `MultiThread` type.
     ///
-    /// This is multi thread worker. Number of threads to use can be specified via parameter.
+    /// This is a multi-thread worker.
+    /// The number of threads to use can be specified via parameter.
     /// Default is `Tokio` default - number of CPU cores.
     MultiThread(RuntimeThreads),
 }
 
-/// Threads number limit for [`Scheduler`] with [`MultiThread`](WorkerType::MultiThread) `Tokio` runtime
+/// Thread number limit for [`Scheduler`] with [`MultiThread`](WorkerType::MultiThread) `Tokio` runtime
 #[derive(Debug, Default)]
 pub enum RuntimeThreads {
-    /// Limits number of thread to number of actual CPU Cores.
+    /// Limits number of threads to number of actual CPU Cores.
     #[default]
     CpuCores,
     /// Sets limit to specified number.
@@ -190,7 +191,7 @@ pub enum RuntimeThreads {
 /// Limit of simultaneously running jobs per [`Scheduler`].
 #[derive(Debug)]
 pub enum WorkerParallelism {
-    /// No limits, use whole potential of your machine.
+    /// No limits, use the whole potential of your machine.
     Unlimited,
     /// Run no more simultaneous jobs than specified (default with 16 jobs).
     Limited(usize),
@@ -205,14 +206,14 @@ impl Default for WorkerParallelism {
 /// Define [`Task`] cancellation behavior.
 #[derive(Debug, Default, Clone)]
 pub enum CancelOpts {
-    /// Orphans task an lets it continue working (default).
+    /// Orphans task and lets it continue working (default).
     #[default]
     Ignore,
     /// Cancel it.
     Kill,
 }
 
-/// Define how to shutdown [`Scheduler`] with running tasks.
+/// Define how to shut down [`Scheduler`] with running tasks.
 #[derive(Debug, Default, Clone)]
 pub enum ShutdownOpts {
     /// Lets running tasks continue working.
@@ -222,7 +223,7 @@ pub enum ShutdownOpts {
     /// Wait until all tasks finish (default).
     #[default]
     WaitForFinish,
-    /// Wait until all tasks finish but no more than specified time. Returns [`Error::IncompleteShutdown`] if timeout.
+    /// Wait until all tasks finish but no more than specified time. Returns [`Error::IncompleteShutdown`] in case of timeout.
     WaitFor(Duration),
 }
 
@@ -234,7 +235,8 @@ pub enum GarbageCollector {
     Disabled,
     /// Don't preserve finished tasks status at all (clean status right after finishing).
     Immediate,
-    /// Run garbage collector every `interval` time and clean up tasks which have been finished more than `expire_after` time ago.
+    /// Run garbage collector every `interval`
+    /// time and cleanup tasks which have been finished more than `expire_after` time ago.
     Periodic {
         expire_after: Duration,
         interval: Duration,
@@ -262,6 +264,7 @@ impl GarbageCollector {
 }
 
 impl GarbageCollector {
+    #[instrument("collect garbage", skip_all)]
     async fn collect_garbage(tasks: Arc<RwLock<HashMap<TaskId, Task>>>, expire_after: Duration) {
         let mut tasks = tasks.write().await;
         let expired_at = SystemTime::now().checked_sub(expire_after).unwrap();
@@ -279,7 +282,7 @@ impl GarbageCollector {
             .collect();
 
         to_remove.iter().for_each(|id| {
-            debug!("collect_garbage: remove expired task={id}");
+            debug!(task_id = %id, "remove expired task");
             tasks.remove(id);
         });
     }
@@ -370,7 +373,13 @@ impl Scheduler {
         parallelism: WorkerParallelism,
         garbage_collector: GarbageCollector,
     ) -> Self {
-        debug!("new: type={:?}, parallelism={parallelism:?}", worker_type);
+        debug!(
+            ?worker_type,
+            ?parallelism,
+            ?garbage_collector,
+            "construct new scheduler"
+        );
+
         let channel = ControlChannel::<ChangeStateEvent>::new(SCHEDULER_CONTROL_CHANNEL_SIZE);
         let tasks = Arc::new(RwLock::new(HashMap::new()));
 
@@ -387,6 +396,7 @@ impl Scheduler {
         }
     }
 
+    #[instrument("scheduler loop", skip_all)]
     async fn work(
         worker_type: WorkerType,
         parallelism: WorkerParallelism,
@@ -412,13 +422,13 @@ impl Scheduler {
                     move |id| {
                         let tasks = tasks.clone();
                         Box::pin(async move {
-                            debug!("garbage_collector: GC job {id} started.");
+                            debug!(job_id = %id, "collecting garbage");
                             GarbageCollector::collect_garbage(tasks, expire_after).await;
-                            debug!("garbage_collector: GC job {id} finished.");
                         })
                     },
                 );
-                // Enqueue GC task, it will be processed in first run of events loop
+                // Enqueue GC task, it will be processed in the first run of events loop
+                debug!(task = ?task, "schedule GC task");
                 channel
                     .send(ChangeStateEvent::EnqueueTask(task))
                     .await
@@ -426,13 +436,13 @@ impl Scheduler {
             }
         }
 
-        debug!("work: start events loop");
         loop {
+            debug!("scheduler loop iteration");
             select! {
                 biased;
                 event = channel.receive() => {
                     if let Some(event) = event {
-                        debug!("work: control event={:?}", event);
+                        debug!(event = ?event, "control event received");
                         match event {
                             ChangeStateEvent::Shutdown(opts) => {
                                 queue.shutdown().await;
@@ -468,12 +478,12 @@ impl Scheduler {
                             }
                         }
                     } else {
-                        warn!("work: empty events channel");
+                        warn!("empty events channel");
                     }
                 },
                 event = queue.next() => {
                     if let Ok(event) = event {
-                        debug!("work: queue event={:?}", event);
+                        debug!(event= ?event, "queue event received");
                         let mut tasks = tasks.write().await;
                         let task = tasks.get_mut(&event.id.into());
 
@@ -492,13 +502,13 @@ impl Scheduler {
                             }
                         }
                         } else {
-                            warn!("work: error from queue received={:?}, exiting", event);
+                            warn!(event = ?event, "error from queue received, exiting");
                             return Err(event.err().unwrap())
                         }
                     },
                 job_id = executor.work() => {
                     if let Ok(job_id) = job_id {
-                        debug!("work: executor event={:?}", job_id);
+                        debug!(job_id = %job_id, "executor event received");
                         let mut tasks = tasks.write().await;
                         let job_state = executor.state(&job_id).await?;
                         let task_id = jobs.get(&job_id);
@@ -506,7 +516,7 @@ impl Scheduler {
                             let is_finished = {
                                 let task = tasks.get_mut(task_id);
                                 if let Some(task) = task {
-                                    debug!("work: job status changed={:?}", job_state);
+                                    debug!(job_state = ?job_state, "job state changed");
                                     let mut at = None;
                                     match job_state {
                                         JobState::Running => { task.state.started(job_id); },
@@ -530,14 +540,14 @@ impl Scheduler {
                                     false
                                 }
                             };
-                            // Remove task from state if GC is Immediate
+                            // Remove the task from state if GC is Immediate
                             if is_finished && garbage_collector == GarbageCollector::Immediate {
-                                debug!("work: immediate GC, remove finished task {task_id}");
+                                debug!(task_id = %task_id, "remove finished task");
                                 tasks.remove(task_id);
                             }
                         }
                     } else {
-                        warn!("work: error from executor received={:?}", job_id);
+                        warn!(job_id = ?job_id, "error from executor received");
                     }
                 }
             }
@@ -565,13 +575,14 @@ impl Default for Scheduler {
 impl TaskScheduler for Scheduler {
     /// Post new [`Task`] to scheduler.
     ///
-    /// Right after that task will be staring to execute according to it's schedule.
+    /// Right after that task will be staring to execute according to its schedule.
     ///
-    /// Returns [`TaskId`] of the scheduled task or [`Error::DuplicatedTaskId`] if task with the same `TaskId` is already present,
-    /// even if it's finished but not removed by getting it's status or by garbage collector.
+    /// Returns [`TaskId`] of the scheduled task or [`Error::DuplicatedTaskId`] if the task with the same `TaskId`
+    /// is already present, even if it's finished but not removed by getting its status or by garbage collector.
     async fn add(&self, task: Task) -> Result<TaskId> {
+        debug!(task_id = %task.id(), "add task");
         let id = task.id();
-        yield_now().await; // to avoid scheduling several tasks within single async scheduler cycle
+        yield_now().await; // to avoid scheduling several tasks within a single async scheduler cycle
         if self.tasks.read().await.get(&id).is_some() {
             Err(Error::DuplicatedTaskId(id))
         } else {
@@ -581,25 +592,27 @@ impl TaskScheduler for Scheduler {
     }
 
     /// Removes [`Task`] with specified [`TaskId`] from the scheduler with respect to [`CancelOpts`]:
-    /// task can be killed or left to continue working up to finish.
+    /// the task can be killed or left to continue working up to finish.
     ///
-    /// Returns [`Error::IncorrectTaskId`] if task is not scheduled or cleaned by garbage collector.
+    /// Returns [`Error::IncorrectTaskId`] if the task is not scheduled or cleaned by garbage collector.
     async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()> {
+        debug!(task_id = %id, ?opts, "cancel task");
         self.send_event(ChangeStateEvent::DropTask(id, opts)).await
     }
 
     /// Returns current [`status`](TaskStatus) of the task.
     ///
-    /// If task is finished then it's status will be removed from the scheduler after
-    /// this method call, so following calls with te same `TaskId` will fail with [`Error::IncorrectTaskId`].
+    /// If the task is finished, then its status will be removed from the scheduler after
+    /// this method call, so the following calls with the same `TaskId` will fail with [`Error::IncorrectTaskId`].
     async fn status(&self, id: &TaskId) -> Result<TaskStatus> {
+        debug!(task_id = %id, "task status requested");
         let mut tasks = self.tasks.write().await;
         let task = tasks.get_mut(id);
 
         if let Some(task) = task {
             let status = task.state.status();
             if task.state.finished() {
-                debug!("status: remove finished task {id}");
+                debug!(task_id = %id, "remove finished task");
                 tasks.remove(id);
             }
             return Ok(status);
@@ -614,7 +627,7 @@ impl TaskScheduler for Scheduler {
     ///
     /// Can return [`Error::IncompleteShutdown`] in case of errors.
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
-        debug!("shutdown: requested with opts={opts:?}");
+        debug!(?opts, "shutdown requested");
         self.send_event(ChangeStateEvent::Shutdown(opts.clone()))
             .await?;
 
@@ -626,6 +639,7 @@ impl TaskScheduler for Scheduler {
                     .map_err(|_e| Error::IncompleteShutdown)?
             }
             ShutdownOpts::WaitFor(timeout) => {
+                debug!(?timeout, "wait for task completion");
                 select! {
                     res = self.handler => {
                         res.map_err(|_e| Error::IncompleteShutdown)?
@@ -817,7 +831,7 @@ mod test {
             .parallelism(WorkerParallelism::Limited(2))
             .build();
 
-        // wait for next 10 seconds interval
+        // wait for the next 10-seconds interval
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -882,7 +896,7 @@ mod test {
             .parallelism(WorkerParallelism::Unlimited)
             .build();
 
-        // wait for next 5 seconds interval
+        // wait for the next 5-seconds interval
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -905,7 +919,7 @@ mod test {
             format!("0,finish,{}", jobs[1]),
         ]);
         let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
-        assert!(logs == expected, "{debug}");
+        assert_eq!(logs, expected, "{debug}");
     }
 
     #[tokio::test]
@@ -924,7 +938,7 @@ mod test {
             GarbageCollector::default(),
         );
 
-        // wait for next 5 seconds interval
+        // wait for the next 5-seconds interval
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -945,7 +959,7 @@ mod test {
             format!("0,finish,{}", jobs[0]),
         ]);
         let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
-        assert!(logs == expected, "{debug}");
+        assert_eq!(logs, expected, "{debug}");
     }
 
     #[tokio::test]
@@ -965,7 +979,7 @@ mod test {
             GarbageCollector::default(),
         );
 
-        // wait for next 3 seconds interval
+        // wait for the next 3-seconds interval
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -994,7 +1008,7 @@ mod test {
             format!("0,finish,{}", jobs[2]),
         ]);
         let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
-        assert!(logs == expected, "{debug}");
+        assert_eq!(logs, expected, "{debug}");
     }
 
     #[tokio::test]

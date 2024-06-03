@@ -30,25 +30,6 @@ jobs:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
 
-      - name: Generate full changelog
-        uses: orhun/git-cliff-action@v3
-        with:
-          config: cliff.toml
-          args: -v --github-token ${{ secrets.GITHUB_TOKEN }}
-        env:
-          OUTPUT: CHANGELOG.md
-          GITHUB_REPO: ${{ github.repository }}
-
-      - name: Commit changelog
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email github-actions[bot]@users.noreply.github.com
-          set +e
-          git checkout main
-          git add CHANGELOG.md
-          git commit -m "Update changelog [skip ci]"
-          git push
-
   release:
     name: Release to Github
     needs: generate-changelog

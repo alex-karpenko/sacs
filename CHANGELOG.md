@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2024-06-03
+### Details
+#### Added
+- Add auto changelog generation to release workflows by @alex-karpenko in [#14](https://github.com/alex-karpenko/sacs/pull/14)
+- Add basic tracing by @alex-karpenko in [#16](https://github.com/alex-karpenko/sacs/pull/16)
+
 ## [0.5.0] - 2024-05-07
 ### Details
 #### Changed
@@ -62,6 +68,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[0.5.1]: https://github.com/alex-karpenko/sacs/compare/v0.5.0..v0.5.1
 [0.5.0]: https://github.com/alex-karpenko/sacs/compare/v0.4.2..v0.5.0
 [0.4.2]: https://github.com/alex-karpenko/sacs/compare/v0.4.1..v0.4.2
 [0.4.1]: https://github.com/alex-karpenko/sacs/compare/v0.4.0..v0.4.1

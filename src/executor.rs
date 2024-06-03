@@ -6,7 +6,7 @@ use crate::{
 };
 use std::collections::{HashMap, VecDeque};
 use tokio::{select, sync::RwLock};
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 /// Default size of control channels
 const EXECUTOR_CONTROL_CHANNEL_SIZE: usize = 1024;
@@ -41,7 +41,7 @@ impl ExecutorJobsState {
 
 impl Executor {
     pub fn new(worker_type: WorkerType, parallelism: WorkerParallelism) -> Self {
-        debug!("new: type={:?}, parallelism={parallelism:?}", worker_type);
+        debug!(?worker_type, ?parallelism, "construct new executor");
         let executor_channel = ControlChannel::new(EXECUTOR_CONTROL_CHANNEL_SIZE);
         let to_executor = executor_channel.sender();
 
@@ -53,10 +53,12 @@ impl Executor {
         }
     }
 
+    #[instrument("process pending jobs", skip_all)]
     async fn requeue_jobs(&self) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         // Nothing to execute
         if jobs.pending.is_empty() {
+            debug!("jobs queue is empty");
             return Ok(());
         }
 
@@ -79,10 +81,11 @@ impl Executor {
             }
         };
 
-        debug!("requeue_jobs: {} new jobs can be started", jobs_to_run);
+        debug!(count = jobs_to_run, "dispatch pending jobs");
         for _ in 0..jobs_to_run {
             if let Some(job) = jobs.pending.pop_front() {
                 let id = job.id();
+                debug!(job_id = %id, "start job");
                 jobs.state.insert(id, JobState::Starting);
                 self.worker.start(job).await?;
             } else {
@@ -101,10 +104,11 @@ impl Default for Executor {
 }
 
 impl JobExecutor for Executor {
+    #[instrument("waiting for executor event", skip_all)]
     async fn work(&self) -> Result<JobId> {
         select! {
             event = self.control_channel.receive() => {
-                debug!("work: control event={:?}", event);
+                debug!(?event, "event received");
                 if let Some(event) = event {
                     match event {
                         ChangeExecutorStateEvent::JobStarted(id) => {
@@ -134,7 +138,7 @@ impl JobExecutor for Executor {
                         },
                     }
                 } else {
-                    warn!("work: empty control channel");
+                    warn!("control channel error, exiting");
                     Err(Error::ReceivingChangeStateEvent)
                 }
             }
@@ -142,7 +146,7 @@ impl JobExecutor for Executor {
     }
 
     async fn enqueue(&self, job: Job) -> Result<JobId> {
-        debug!("enqueue: job={:?}", job);
+        debug!(job_id = %job.id(), "enqueue job");
         let id = job.id();
         {
             let mut jobs = self.jobs.write().await;
@@ -157,18 +161,18 @@ impl JobExecutor for Executor {
     }
 
     async fn cancel(&self, id: &JobId) -> Result<()> {
-        debug!("cancel: job id={:?}", id);
+        debug!(job_id = %id, "cancel job");
         self.worker.cancel(id).await?;
         Ok(())
     }
 
     async fn state(&self, id: &JobId) -> Result<JobState> {
-        debug!("state: id={:?}", id);
+        debug!(job_id = %id, "job state requested");
         let mut jobs = self.jobs.write().await;
         if let Some(state) = jobs.state.get(id) {
             let response = Ok(state.clone());
             if state.finished() {
-                debug!("state: remove finished job state, id={:?}", id);
+                debug!(job_id = %id, "remove finished job state");
                 jobs.state.remove(id);
             }
             response
@@ -178,7 +182,7 @@ impl JobExecutor for Executor {
     }
 
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()> {
-        debug!("shutdown: requested");
+        debug!(?opts, "shutdown requested");
         let result = self.worker.shutdown(opts).await;
         self.jobs.write().await.clear();
 
@@ -247,7 +251,7 @@ mod test {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 assert_eq!(executor.state(&job_id_1).await.unwrap(), JobState::Pending);
             },
-            // wait 400ms and cancel 1st
+            // wait 400ms and cancel 1st,
             // 1st - Running, 2nd - Pending
             async {
                 tokio::time::sleep(Duration::from_millis(400)).await;
@@ -259,7 +263,7 @@ mod test {
                 assert_eq!(executor.state(&job_id_1).await.unwrap(), JobState::Pending);
             },
             // wait 600ms
-            // 1st - Cancelled, 2nd - Running
+            // 1st - Canceled, 2nd - Running
             async {
                 tokio::time::sleep(Duration::from_millis(600)).await;
                 assert_eq!(

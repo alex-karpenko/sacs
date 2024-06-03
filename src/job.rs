@@ -10,7 +10,7 @@ use uuid::Uuid;
 ///
 /// You don't need to construct this object manually:
 /// - `task_id` is provided from `Scheduler` during planned starting of the `Task` instance,
-/// - `job_id` is a created automatically `Uuid`.
+/// - `job_id` is created automatically `Uuid`.
 ///
 /// Executor creates `JobId` for each running job and provides it to job's closure as a parameter (`id` in the example below).
 ///

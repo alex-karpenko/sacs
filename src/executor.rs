@@ -122,6 +122,13 @@ impl JobExecutor for Executor {
                             self.requeue_jobs().await?;
                             Ok(id)
                         },
+                        ChangeExecutorStateEvent::JobTimeout(id) => {
+                            {
+                                self.jobs.write().await.state.insert(id.clone(), JobState::Timeout);
+                            }
+                            self.requeue_jobs().await?;
+                            Ok(id)
+                        },
                         ChangeExecutorStateEvent::JobCompleted(id) => {
                             {
                                 self.jobs.write().await.state.insert(id.clone(), JobState::Completed);
@@ -188,6 +195,7 @@ impl JobExecutor for Executor {
 pub(crate) enum ChangeExecutorStateEvent {
     JobStarted(JobId),
     JobCancelled(JobId),
+    JobTimeout(JobId),
     JobCompleted(JobId),
 }
 
@@ -210,7 +218,7 @@ mod test {
         });
         let job_0 = task_0.job.clone();
         let job_id_0 = JobId::new("task 0 id");
-        let job_0 = Job::new(job_id_0.clone(), job_0);
+        let job_0 = Job::new(job_id_0.clone(), job_0, None);
 
         let task_1 = Task::new(TaskSchedule::Once, |_id| {
             Box::pin(async move {
@@ -219,7 +227,7 @@ mod test {
         });
         let job_1 = task_1.job.clone();
         let job_id_1 = JobId::new("task 1 id");
-        let job_1 = Job::new(job_id_1.clone(), job_1);
+        let job_1 = Job::new(job_id_1.clone(), job_1, None);
 
         executor.enqueue(job_0).await.unwrap();
         executor.enqueue(job_1).await.unwrap();

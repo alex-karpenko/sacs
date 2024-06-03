@@ -34,6 +34,12 @@ pub struct Worker {
     channel: Sender<ChangeStateEvent>,
 }
 
+#[derive(Debug)]
+enum JobExecutionResult {
+    Completed,
+    Timeout,
+}
+
 impl Worker {
     pub fn new(type_: WorkerType, executor_channel: Sender<ChangeExecutorStateEvent>) -> Self {
         let worker_channel = ControlChannel::<ChangeStateEvent>::new(WORKER_CONTROL_CHANNEL_SIZE);
@@ -91,12 +97,13 @@ impl Worker {
         worker_channel: ControlChannel<ChangeStateEvent>,
     ) {
         let mut ids: Vec<JobId> = Vec::new();
-        let mut handlers: Vec<JoinHandle<()>> = Vec::new();
+        let mut handlers: Vec<JoinHandle<JobExecutionResult>> = Vec::new();
 
         // Push a single always-pending job to avoid panics on empty select_all
         let fake_id = JobId::new(Uuid::new_v4());
-        let fake_handler =
-            tokio::task::spawn(Box::pin(async { futures::future::pending::<()>().await }));
+        let fake_handler = tokio::task::spawn(Box::pin(async {
+            futures::future::pending::<JobExecutionResult>().await
+        }));
         ids.push(fake_id);
         handlers.push(fake_handler);
 
@@ -110,11 +117,24 @@ impl Worker {
                             ChangeStateEvent::StartJob(job) => {
                                 let id = job.id();
                                 let job_to_run = &job.job();
-                                let mut job_to_run = job_to_run.write().await;
-                                let job_to_run = (job_to_run)(id);
-                                let handler = tokio::task::spawn(Box::pin(job_to_run));
+                                let job_to_run = (job_to_run.write().await)(id);
+
                                 ids.push(job.id());
-                                handlers.push(handler);
+
+                                if let Some(timeout) = job.timeout() {
+                                    let handler = tokio::task::spawn(Box::pin(async move {
+                                        select! {
+                                            _ = job_to_run => {JobExecutionResult::Completed},
+                                            _ = tokio::time::sleep(timeout) => {JobExecutionResult::Timeout}
+                                            }
+                                        }
+                                    ));
+                                    handlers.push(handler);
+                                } else {
+                                    let handler = tokio::task::spawn(Box::pin(async move {job_to_run.await; JobExecutionResult::Completed}));
+                                    handlers.push(handler);
+                                }
+
                                 let _ = executor_channel
                                     .send(ChangeExecutorStateEvent::JobStarted(job.id()))
                                     .await
@@ -170,17 +190,39 @@ impl Worker {
                     }
                 },
                 completed = select_all(&mut handlers.iter_mut()) => {
-                    let (_, index, _) = completed;
+                    let (result, index, _) = completed;
                     let id = ids.get(index);
-                    debug!(job_id = ?id, "job completed");
+
                     if let Some(id) = id {
                         let id = id.clone();
                         ids.remove(index);
                         handlers.remove(index);
+
+                        let job_completion_state = match result {
+                            Ok(completion_result) => {
+                                match completion_result {
+                                    JobExecutionResult::Completed => {
+                                        debug!(job_id = ?id, "job completed successfully");
+                                        ChangeExecutorStateEvent::JobCompleted(id)
+                                    },
+                                    JobExecutionResult::Timeout => {
+                                        debug!(job_id = ?id, "job timed out and killed");
+                                        ChangeExecutorStateEvent::JobTimeout(id)
+                                    },
+                                }
+                            },
+                            Err(err) => {
+                                debug!(job_id = ?id, error = %err, "job finished with error");
+                                // TODO: introduce new state to reflect error
+                                ChangeExecutorStateEvent::JobCompleted(id)
+                            },
+                        };
                         let _ = executor_channel
-                            .send(ChangeExecutorStateEvent::JobCompleted(id))
+                            .send(job_completion_state)
                             .await
                             .map_err(|_e| Error::SendingChangeStateEvent);
+                    } else {
+                        debug!(?result, "unexpected job finished")
                     }
                 }
             }

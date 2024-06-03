@@ -129,7 +129,10 @@ pub(crate) enum JobState {
 
 impl JobState {
     pub fn finished(&self) -> bool {
-        *self == JobState::Completed || *self == JobState::Canceled || *self == JobState::Timeout
+        *self == JobState::Completed
+            || *self == JobState::Canceled
+            || *self == JobState::Timeout
+            || *self == JobState::Error
     }
 }
 
@@ -146,6 +149,7 @@ mod test {
         assert!(JobState::Completed.finished());
         assert!(JobState::Canceled.finished());
         assert!(JobState::Timeout.finished());
+        assert!(JobState::Error.finished());
     }
 
     #[test]

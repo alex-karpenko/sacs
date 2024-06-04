@@ -12,10 +12,10 @@ use tracing::{debug, instrument, warn};
 const EXECUTOR_CONTROL_CHANNEL_SIZE: usize = 1024;
 
 pub(crate) trait JobExecutor {
+    async fn work(&self) -> Result<JobId>;
     async fn enqueue(&self, job: Job) -> Result<JobId>;
     async fn cancel(&self, id: &JobId) -> Result<()>;
     async fn state(&self, id: &JobId) -> Result<JobState>;
-    async fn work(&self) -> Result<JobId>;
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
 }
 
@@ -115,9 +115,9 @@ impl JobExecutor for Executor {
                             self.jobs.write().await.state.insert(id.clone(), JobState::Running);
                             Ok(id)
                         },
-                        ChangeExecutorStateEvent::JobCancelled(id) => {
+                        ChangeExecutorStateEvent::JobCanceled(id) => {
                             {
-                                self.jobs.write().await.state.insert(id.clone(), JobState::Cancelled);
+                                self.jobs.write().await.state.insert(id.clone(), JobState::Canceled);
                             }
                             self.requeue_jobs().await?;
                             Ok(id)
@@ -125,6 +125,13 @@ impl JobExecutor for Executor {
                         ChangeExecutorStateEvent::JobTimeout(id) => {
                             {
                                 self.jobs.write().await.state.insert(id.clone(), JobState::Timeout);
+                            }
+                            self.requeue_jobs().await?;
+                            Ok(id)
+                        },
+                        ChangeExecutorStateEvent::JobError(id) => {
+                            {
+                                self.jobs.write().await.state.insert(id.clone(), JobState::Error);
                             }
                             self.requeue_jobs().await?;
                             Ok(id)
@@ -194,8 +201,9 @@ impl JobExecutor for Executor {
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum ChangeExecutorStateEvent {
     JobStarted(JobId),
-    JobCancelled(JobId),
+    JobCanceled(JobId),
     JobTimeout(JobId),
+    JobError(JobId),
     JobCompleted(JobId),
 }
 
@@ -266,10 +274,7 @@ mod test {
             // 1st - Canceled, 2nd - Running
             async {
                 tokio::time::sleep(Duration::from_millis(600)).await;
-                assert_eq!(
-                    executor.state(&job_id_0).await.unwrap(),
-                    JobState::Cancelled
-                );
+                assert_eq!(executor.state(&job_id_0).await.unwrap(), JobState::Canceled);
             },
             async {
                 tokio::time::sleep(Duration::from_millis(600)).await;

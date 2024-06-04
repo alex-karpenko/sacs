@@ -468,22 +468,19 @@ impl Scheduler {
                             },
                             ChangeStateEvent::DropTask(id, opts) => {
                                 let mut tasks = tasks.write().await;
-                                let task = tasks.get_mut(&id);
+                                let task = tasks.get(&id);
                                 if let Some(task) = task {
                                     let event_id = id.clone().into();
                                     queue.pop(&event_id).await?;
                                     match opts {
-                                        CancelOpts::Ignore => {
-                                            for job_id in task.state.jobs() {
-                                                task.state.job_canceled(&job_id);
-                                            }
-                                        },
+                                        CancelOpts::Ignore => {},
                                         CancelOpts::Kill => {
-                                            for job_id in task.state.jobs() {
-                                                executor.cancel(&job_id).await?;
+                                            for job in task.state.jobs() {
+                                                executor.cancel(&job).await?;
                                             }
                                         },
                                     }
+                                    tasks.remove(&id);
                                 }
                             }
                         }
@@ -1393,7 +1390,7 @@ mod test {
         .with_id("OK");
 
         let task2 = task1.clone().with_id("CANCELED KILLED");
-        let task3 = task1.clone().with_id("CANCELLED IGNORED");
+        let task3 = task1.clone().with_id("CANCELED IGNORED");
 
         let id1 = scheduler.add(task1).await.unwrap();
         let id2 = scheduler.add(task2).await.unwrap();
@@ -1439,13 +1436,7 @@ mod test {
                 ..Default::default()
             }
         );
-        assert_eq!(
-            scheduler.statistics(&id2).await.unwrap(),
-            TaskStatistics {
-                canceled: 1,
-                ..Default::default()
-            }
-        );
+        assert!(scheduler.statistics(&id2).await.is_err());
         assert_eq!(
             scheduler.statistics(&id3).await.unwrap(),
             TaskStatistics {
@@ -1454,7 +1445,7 @@ mod test {
             }
         );
         assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
-        assert_eq!(scheduler.status(&id2).await.unwrap(), TaskStatus::Finished);
+        assert!(scheduler.status(&id2).await.is_err());
         assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Running);
 
         scheduler
@@ -1470,17 +1461,10 @@ mod test {
                 ..Default::default()
             }
         );
-        assert!(scheduler.statistics(&id2).await.is_err());
-        assert_eq!(
-            scheduler.statistics(&id3).await.unwrap(),
-            TaskStatistics {
-                canceled: 1,
-                ..Default::default()
-            }
-        );
+        assert!(scheduler.statistics(&id3).await.is_err());
+
         assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
-        assert!(scheduler.status(&id2).await.is_err());
-        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Finished);
+        assert!(scheduler.status(&id3).await.is_err());
 
         tokio::time::sleep(Duration::from_millis(400)).await;
 
@@ -1491,12 +1475,10 @@ mod test {
                 ..Default::default()
             }
         );
-        assert!(scheduler.statistics(&id2).await.is_err());
-        assert!(scheduler.statistics(&id3).await.is_err());
 
         assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Finished);
-        assert!(scheduler.status(&id2).await.is_err());
-        assert!(scheduler.status(&id3).await.is_err());
+
+        assert!(scheduler.status(&id1).await.is_err());
 
         let _ = scheduler
             .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))

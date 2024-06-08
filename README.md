@@ -14,9 +14,10 @@
 
 ## Features
 
-- Runs tasks with different types of schedule: once, with delay, by interval, with cron schedule.
+- Runs tasks with different types of schedule: once, with delay, by interval, with a cron schedule.
 - Uses current `Tokio` runtime or creates new one with specified type, number of threads and limited parallelism.
-- Allows task cancellation and getting current state and runtime statistics of the task
+- Allows task cancellation, getting current state and runtime statistics of the task.
+- Task execution time may be limited.
 - Lightweight, small, easy to use.
 
 ## Quick start

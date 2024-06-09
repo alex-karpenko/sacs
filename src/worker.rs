@@ -28,7 +28,7 @@ enum ChangeStateEvent {
     Shutdown(ShutdownOpts),
 }
 
-pub struct Worker {
+pub(crate) struct Worker {
     tokio_handler: Option<JoinHandle<()>>,
     thread_handler: Option<std::thread::JoinHandle<()>>,
     channel: Sender<ChangeStateEvent>,

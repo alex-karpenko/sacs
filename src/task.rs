@@ -297,7 +297,7 @@ impl std::fmt::Debug for Task {
 }
 
 /// Unique identifier of [`Task`] which can be used to address the task in `Scheduler`.
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId {
     pub(crate) id: String,
 }
@@ -406,7 +406,7 @@ impl Display for TaskId {
 ///             });
 /// ```
 ///
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TaskSchedule {
     /// Starts the job immediately and runs it once (no repetitions).
     Once,
@@ -477,7 +477,7 @@ impl TaskSchedule {
 }
 
 /// Defines specific behavior of cron schedule.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CronOpts {
     /// If `true` then the first job will be scheduled right after adding the task to scheduler even if
     /// this time is out of schedule. Default is `false`.
@@ -502,7 +502,7 @@ pub struct CronOpts {
 /// - when the task is completed, it may be rescheduled (if it's repeatable) and moved to `Waiting` or `Scheduled`,
 /// or may be `Finished`
 /// if that's kind of one-shot task.
-#[derive(Default, Clone, PartialEq, Debug)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TaskStatus {
     /// Just created, not added to `Scheduler`.
     #[default]
@@ -518,7 +518,7 @@ pub enum TaskStatus {
 }
 
 /// Struct represents various statistic numbers about [`Task`].
-#[derive(Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskStatistics {
     /// Number of jobs in waiting state: they will be running when time to run arrived.
     pub waiting: usize,
@@ -697,7 +697,7 @@ impl TaskState {
 /// let something_senseless: CronSchedule = "*/10 0 9 1 1 Sat,Sun */2".try_into().unwrap();
 /// ```
 ///
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CronSchedule {
     schedule: Schedule,
 }

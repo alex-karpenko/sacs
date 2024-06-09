@@ -153,13 +153,14 @@ pub trait TaskScheduler {
 /// }
 /// ```
 ///
+#[derive(Debug)]
 pub struct Scheduler {
     tasks: Arc<RwLock<HashMap<TaskId, Task>>>,
     channel: Sender<ChangeStateEvent>,
     handler: tokio::task::JoinHandle<Result<()>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ChangeStateEvent {
     Shutdown(ShutdownOpts),
     EnqueueTask(Task),
@@ -167,7 +168,7 @@ enum ChangeStateEvent {
 }
 
 /// Type of `Tokio` runtime to use for jobs worker.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WorkerType {
     /// Use current runtime instead of creating new one.
     ///
@@ -186,7 +187,7 @@ pub enum WorkerType {
 }
 
 /// Thread number limit for [`Scheduler`] with [`MultiThread`](WorkerType::MultiThread) `Tokio` runtime
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RuntimeThreads {
     /// Limits number of threads to number of actual CPU Cores.
     #[default]
@@ -196,7 +197,7 @@ pub enum RuntimeThreads {
 }
 
 /// Limit of simultaneously running jobs per [`Scheduler`].
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WorkerParallelism {
     /// No limits, use the whole potential of your machine.
     Unlimited,
@@ -211,7 +212,7 @@ impl Default for WorkerParallelism {
 }
 
 /// Define [`Task`] cancellation behavior.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CancelOpts {
     /// Orphans task and lets it continue working (default).
     #[default]
@@ -221,7 +222,7 @@ pub enum CancelOpts {
 }
 
 /// Define how to shut down [`Scheduler`] with running tasks.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShutdownOpts {
     /// Lets running tasks continue working.
     IgnoreRunning,
@@ -235,7 +236,7 @@ pub enum ShutdownOpts {
 }
 
 /// Define parameters of orphaned task's garbage collector.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GarbageCollector {
     /// Don't collect garbage (default).
     #[default]
@@ -326,7 +327,7 @@ impl GarbageCollector {
 ///         .await
 /// }
 ///```
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SchedulerBuilder {
     worker_type: WorkerType,
     parallelism: WorkerParallelism,

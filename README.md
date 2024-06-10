@@ -8,15 +8,16 @@
 <a href="https://github.com/alex-karpenko/sacs/actions/workflows/publish.yaml" rel="nofollow"><img src="https://img.shields.io/github/actions/workflow/status/alex-karpenko/sacs/publish.yaml?label=publish" alt="Crates.io publishing status"></a>
 <a href="https://docs.rs/sacs" rel="nofollow"><img src="https://img.shields.io/docsrs/sacs" alt="docs.rs status"></a>
 <a href="https://crates.io/crates/sacs" rel="nofollow"><img src="https://img.shields.io/crates/v/sacs" alt="Version at Crates.io"></a>
-<a href="https://crates.io/crates/sacs" rel="nofollow"><img alt="Crates.io MSRV" src="https://img.shields.io/crates/msrv/sacs"></a>
 <a href="https://github.com/alex-karpenko/sacs/blob/HEAD/LICENSE" rel="nofollow"><img src="https://img.shields.io/crates/l/sacs" alt="License"></a>
 </p>
+<!-- <a href="https://crates.io/crates/sacs" rel="nofollow"><img alt="Crates.io MSRV" src="https://img.shields.io/crates/msrv/sacs"></a> -->
 
 ## Features
 
-- Runs tasks with different types of schedule: once, with delay, by interval, with cron schedule.
+- Runs tasks with different types of schedule: once, with delay, by interval, with a cron schedule.
 - Uses current `Tokio` runtime or creates new one with specified type, number of threads and limited parallelism.
-- Allows task cancellation and getting current state of task.
+- Allows task cancellation, getting current state and runtime statistics of the task.
+- Task execution time may be limited.
 - Lightweight, small, easy to use.
 
 ## Quick start
@@ -71,7 +72,7 @@ async fn main() -> Result<()> {
 [`JobId`](https://docs.rs/sacs/latest/sacs/job/struct.JobId.html) more flexible and
 convenient to create and refer tasks.
 - [x] Tracing.
-- [ ] Task with limited execution time.
+- [x] Task with limited execution time.
 - [ ] More examples.
 
 ## License

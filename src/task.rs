@@ -26,6 +26,7 @@ pub struct Task {
     pub(crate) job: AsyncJobBoxed,
     pub(crate) schedule: TaskSchedule,
     pub(crate) state: TaskState,
+    pub(crate) timeout: Option<Duration>,
 }
 
 impl Task {
@@ -57,6 +58,7 @@ impl Task {
             job: Arc::new(RwLock::new(Box::new(job))),
             schedule,
             state: TaskState::default(),
+            timeout: None,
         }
     }
 
@@ -158,6 +160,48 @@ impl Task {
         }
     }
 
+    /// Add execution time limit to the existing [`Task`].
+    ///
+    /// Method is useful to constrain execution time when long-running time is evidence of the potential issue.
+    ///
+    /// Method consumes `Task` instance and returns the same instance with time constraint added.
+    /// Since [`Task`] is cloneable, this method can be used to create several identical tasks with different limits.
+    ///
+    /// Be careful: [`Task::clone()`] doesn't change `TaskId`,
+    /// so it's your responsibility to ensure the uniqueness of task's Id before
+    /// posting it to `Scheduler`.
+    /// Anyway, `Scheduler::add()` method rejects new `Task` if the same (with the same `TaskId`) is already present,
+    /// even if it's finished but not removed by getting its status or by garbage collector.
+    ///
+    /// # Examples:
+    ///
+    /// ```rust
+    /// use sacs::task::{Task, TaskSchedule};
+    /// use std::time::Duration;
+    ///
+    /// let task1 = Task::new(TaskSchedule::Once, move |id| {
+    ///     Box::pin(async move {
+    ///         println!("Starting job {id}.");
+    ///         // Actual async workload here
+    ///         tokio::time::sleep(Duration::from_secs(2)).await;
+    ///         // ...
+    ///         println!("Job {id} finished.");
+    ///         })
+    ///     })
+    ///     .with_timeout(Duration::from_secs(5))
+    ///     .with_id("Execute once with 5s timeout, should succeed");
+    ///
+    /// let task2 = task1.clone()
+    ///         .with_timeout(Duration::from_secs(1))
+    ///         .with_id("Execute once with 1s timeout, should fail");
+    /// ```
+    pub fn with_timeout(self, timeout: impl Into<Duration>) -> Self {
+        Self {
+            timeout: Some(timeout.into()),
+            ..self
+        }
+    }
+
     /// Create a new [`Task`] with a specified schedule, job function and explicit [`TaskId`].
     ///
     /// This method is useful if you need to know [`TaskId`] before a task is scheduled.
@@ -210,10 +254,11 @@ impl Task {
             job: Arc::new(RwLock::new(Box::new(job))),
             schedule,
             state: TaskState::default(),
+            timeout: None,
         }
     }
 
-    /// Returns task's [`TaskId`], it can be used to `drop` task or to get it's `status`.
+    /// Returns task's [`TaskId`], it can be used to `drop` task or to get it's `status` or `statistics`.
     pub fn id(&self) -> TaskId {
         self.id.clone()
     }
@@ -223,9 +268,20 @@ impl Task {
         self.schedule.clone()
     }
 
+    /// Returns configured Tasks' timeout wrapped in `Option`.
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
+    }
+
     /// Returns task's status.
     pub fn status(&self) -> TaskStatus {
         self.state.status()
+    }
+
+    /// Returns various statistics related to the current Tasks' state,
+    /// please refer to the [`TaskStatistics`] definition for details.
+    pub fn statistics(&self) -> TaskStatistics {
+        self.state.statistics.clone()
     }
 }
 
@@ -235,12 +291,13 @@ impl std::fmt::Debug for Task {
             .field("id", &self.id)
             .field("schedule", &self.schedule)
             .field("state", &self.state)
+            .field("timeout", &self.timeout)
             .finish()
     }
 }
 
 /// Unique identifier of [`Task`] which can be used to address the task in `Scheduler`.
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId {
     pub(crate) id: String,
 }
@@ -349,7 +406,7 @@ impl Display for TaskId {
 ///             });
 /// ```
 ///
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TaskSchedule {
     /// Starts the job immediately and runs it once (no repetitions).
     Once,
@@ -420,7 +477,7 @@ impl TaskSchedule {
 }
 
 /// Defines specific behavior of cron schedule.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CronOpts {
     /// If `true` then the first job will be scheduled right after adding the task to scheduler even if
     /// this time is out of schedule. Default is `false`.
@@ -445,28 +502,43 @@ pub struct CronOpts {
 /// - when the task is completed, it may be rescheduled (if it's repeatable) and moved to `Waiting` or `Scheduled`,
 /// or may be `Finished`
 /// if that's kind of one-shot task.
-#[derive(Default, Clone, PartialEq, Debug)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TaskStatus {
     /// Just created, not added to `Scheduler`.
     #[default]
     New,
-    /// Scheduler waits for the specified moment to run the job.
+    /// Scheduler waits for the specified moment of time to run the job.
     Waiting,
     /// Job instance has been scheduled to execute but hasn't been run yet.
     Scheduled,
     /// It works right now.
     Running,
-    /// All jobs of the task have been finished (completed or canceled), and no more jobs will be scheduled anymore.
+    /// All jobs of the task have been finished (completed, canceled or timed out), and no more jobs will be scheduled anymore.
     Finished,
+}
+
+/// Struct represents various statistic numbers about [`Task`].
+#[derive(Default, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskStatistics {
+    /// Number of jobs in waiting state: they will be running when time to run arrived.
+    pub waiting: usize,
+    /// Number of scheduled but not yet running jobs.
+    pub scheduled: usize,
+    /// Number of jobs in running state.
+    pub running: usize,
+    /// Number of successfully completed jobs.
+    pub completed: usize,
+    /// Number of canceled jobs.
+    pub canceled: usize,
+    /// Number of jobs killed because run time limit exceeded.
+    pub timeouts: usize,
+    /// Number of jobs finished unsuccessfully because of runtime errors.
+    pub errors: usize,
 }
 
 #[derive(Default, Clone)]
 pub(crate) struct TaskState {
-    waiting: usize,
-    scheduled: usize,
-    running: usize,
-    completed: usize,
-    cancelled: usize,
+    statistics: TaskStatistics,
     scheduled_jobs: BTreeSet<JobId>,
     running_jobs: BTreeSet<JobId>,
     last_finished_at: Option<SystemTime>,
@@ -481,11 +553,13 @@ impl std::fmt::Debug for TaskState {
         };
 
         f.debug_struct("TaskState")
-            .field("waiting", &self.waiting)
-            .field("scheduled", &self.scheduled)
-            .field("running", &self.running)
-            .field("completed", &self.completed)
-            .field("cancelled", &self.cancelled)
+            .field("waiting", &self.statistics.waiting)
+            .field("scheduled", &self.statistics.scheduled)
+            .field("running", &self.statistics.running)
+            .field("completed", &self.statistics.completed)
+            .field("canceled", &self.statistics.canceled)
+            .field("timeouts", &self.statistics.timeouts)
+            .field("errors", &self.statistics.errors)
             .field("scheduled_jobs", &self.scheduled_jobs)
             .field("running_jobs", &self.running_jobs)
             .field("last_finished_at", &last_finished_at)
@@ -495,69 +569,96 @@ impl std::fmt::Debug for TaskState {
 
 impl TaskState {
     pub(crate) fn status(&self) -> TaskStatus {
-        if self.running > 0 {
+        if self.statistics.running > 0 {
             TaskStatus::Running
-        } else if self.scheduled > 0 {
+        } else if self.statistics.scheduled > 0 {
             TaskStatus::Scheduled
-        } else if self.waiting > 0 {
+        } else if self.statistics.waiting > 0 {
             TaskStatus::Waiting
-        } else if (self.completed + self.cancelled) > 0 {
+        } else if (self.statistics.completed
+            + self.statistics.canceled
+            + self.statistics.timeouts
+            + self.statistics.errors)
+            > 0
+        {
             TaskStatus::Finished
         } else {
             TaskStatus::New
         }
     }
 
-    pub(crate) fn enqueued(&mut self) -> &Self {
-        self.waiting += 1;
+    pub(crate) fn task_enqueued(&mut self) -> &Self {
+        self.statistics.waiting += 1;
         debug!(status = ?self.status(), "task enqueued");
         self
     }
 
-    pub(crate) fn scheduled(&mut self, id: JobId) -> &Self {
-        self.waiting -= 1;
-        self.scheduled += 1;
+    pub(crate) fn job_scheduled(&mut self, id: JobId) -> &Self {
+        self.statistics.waiting -= 1;
+        self.statistics.scheduled += 1;
         self.scheduled_jobs.insert(id);
-        debug!(status = ?self.status(), "task scheduled");
+        debug!(status = ?self.status(), "job scheduled");
         self
     }
 
-    pub(crate) fn started(&mut self, id: JobId) -> &Self {
-        self.scheduled -= 1;
-        self.running += 1;
+    pub(crate) fn job_started(&mut self, id: JobId) -> &Self {
+        self.statistics.scheduled -= 1;
+        self.statistics.running += 1;
         self.scheduled_jobs.remove(&id);
         self.running_jobs.insert(id);
-        debug!(status = ?self.status(), "task started");
+        debug!(status = ?self.status(), "job started");
         self
     }
 
-    pub(crate) fn completed(&mut self, id: &JobId) -> &Self {
-        self.running -= 1;
-        self.completed += 1;
+    pub(crate) fn job_completed(&mut self, id: &JobId) -> &Self {
+        self.statistics.running -= 1;
+        self.statistics.completed += 1;
         self.running_jobs.remove(id);
         self.last_finished_at = Some(SystemTime::now());
-        debug!(status = ?self.status(), "task completed");
+        debug!(status = ?self.status(), "job completed");
         self
     }
 
-    pub(crate) fn cancelled(&mut self, id: &JobId) -> &Self {
-        self.cancelled += 1;
+    pub(crate) fn job_canceled(&mut self, id: &JobId) -> &Self {
+        self.statistics.canceled += 1;
         if self.running_jobs.remove(id) {
-            self.running -= 1;
+            self.statistics.running -= 1;
         } else {
             self.scheduled_jobs.remove(id);
-            self.scheduled -= 1;
+            self.statistics.scheduled -= 1;
         }
         self.last_finished_at = Some(SystemTime::now());
-        debug!(status = ?self.status(), "task canceled");
+        debug!(status = ?self.status(), "job canceled");
         self
     }
 
-    pub(crate) fn finished(&self) -> bool {
-        self.waiting == 0
-            && self.scheduled == 0
-            && self.running == 0
-            && (self.completed + self.cancelled) > 0
+    pub(crate) fn job_timeout(&mut self, id: &JobId) -> &Self {
+        self.statistics.running -= 1;
+        self.statistics.timeouts += 1;
+        self.running_jobs.remove(id);
+        self.last_finished_at = Some(SystemTime::now());
+        debug!(status = ?self.status(), "job killed because timeout");
+        self
+    }
+
+    pub(crate) fn job_error(&mut self, id: &JobId) -> &Self {
+        self.statistics.running -= 1;
+        self.statistics.errors += 1;
+        self.running_jobs.remove(id);
+        self.last_finished_at = Some(SystemTime::now());
+        debug!(status = ?self.status(), "job finished with error");
+        self
+    }
+
+    pub(crate) fn is_task_finished(&self) -> bool {
+        self.statistics.waiting == 0
+            && self.statistics.scheduled == 0
+            && self.statistics.running == 0
+            && (self.statistics.completed
+                + self.statistics.canceled
+                + self.statistics.timeouts
+                + self.statistics.errors)
+                > 0
             && self.scheduled_jobs.is_empty()
             && self.running_jobs.is_empty()
     }
@@ -596,7 +697,7 @@ impl TaskState {
 /// let something_senseless: CronSchedule = "*/10 0 9 1 1 Sat,Sun */2".try_into().unwrap();
 /// ```
 ///
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CronSchedule {
     schedule: Schedule,
 }
@@ -706,56 +807,359 @@ mod test {
 
     #[test]
     fn task_state_transition() {
-        let job1 = JobId::new("task 1 id");
-        let job2 = JobId::new("task 2 id");
+        let job1 = JobId::new("task1");
+        let job2 = JobId::new("task2");
+        let job3 = JobId::new("task3");
+        let job4 = JobId::new("task4");
+        let job5 = JobId::new("task5");
 
         let mut state = TaskState::default();
         assert_eq!(state.status(), TaskStatus::New);
-        assert!(!state.finished());
+        assert!(!state.is_task_finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
+        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
+        assert_eq!(state.statistics, TaskStatistics::default());
 
-        state.enqueued();
+        state.task_enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
-        assert!(!state.finished());
+        assert!(!state.is_task_finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 1, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 1,
+                ..Default::default()
+            }
+        );
 
-        state.enqueued();
+        state.task_enqueued();
         assert_eq!(state.status(), TaskStatus::Waiting);
-        assert!(!state.finished());
+        assert!(!state.is_task_finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), String::from("TaskState { waiting: 2, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }"));
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 2,
+                ..Default::default()
+            }
+        );
 
-        state.scheduled(job1.clone());
+        state.task_enqueued();
+        assert_eq!(state.status(), TaskStatus::Waiting);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 3,
+                ..Default::default()
+            }
+        );
+
+        state.task_enqueued();
+        assert_eq!(state.status(), TaskStatus::Waiting);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 4,
+                ..Default::default()
+            }
+        );
+
+        state.task_enqueued();
+        assert_eq!(state.status(), TaskStatus::Waiting);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 5,
+                ..Default::default()
+            }
+        );
+
+        state.job_scheduled(job1.clone());
         assert_eq!(state.status(), TaskStatus::Scheduled);
-        assert!(!state.finished());
+        assert!(!state.is_task_finished());
         assert!(state.last_finished_at().is_none());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 1, scheduled: 1, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {{JobId {{ id: {}, task_id: TaskId {{ id: \"task 1 id\" }} }}}}, running_jobs: {{}}, last_finished_at: \"None\" }}", job1.id.to_string()));
-
-        state.started(job1.clone());
-        assert_eq!(state.status(), TaskStatus::Running);
-        assert!(!state.finished());
-        assert!(state.last_finished_at().is_none());
-
-        state.scheduled(job2.clone());
-        assert_eq!(state.status(), TaskStatus::Running);
-        assert!(!state.finished());
-        assert!(state.last_finished_at().is_none());
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 4, scheduled: 1, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{JobId {{ task_id: TaskId {{ id: \"task1\" }}, id: {} }}}}, running_jobs: {{}}, last_finished_at: \"None\" }}", job1.id.to_string()));
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 4,
+                scheduled: 1,
+                ..Default::default()
+            }
+        );
 
         let jobs = state.jobs();
-        let expected = BTreeSet::<JobId>::from([job1.clone(), job2.clone()]);
+        let expected = BTreeSet::<JobId>::from([job1.clone()]);
         assert_eq!(jobs, expected);
 
-        state.cancelled(&job2);
+        state.job_started(job1.clone());
         assert_eq!(state.status(), TaskStatus::Running);
-        assert!(!state.finished());
-        assert!(state.last_finished_at().is_some());
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 4,
+                scheduled: 0,
+                running: 1,
+                ..Default::default()
+            }
+        );
 
-        state.completed(&job1);
-        assert_eq!(state.status(), TaskStatus::Finished);
-        assert!(state.finished());
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([job1.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_scheduled(job5.clone());
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 3,
+                scheduled: 1,
+                running: 1,
+                ..Default::default()
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([job1.clone(), job5.clone()]);
+
+        assert_eq!(jobs, expected);
+        state.job_started(job5.clone());
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 3,
+                scheduled: 0,
+                running: 2,
+                ..Default::default()
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([job1.clone(), job5.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_scheduled(job2.clone());
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 2,
+                scheduled: 1,
+                running: 2,
+                ..Default::default()
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([job1.clone(), job2.clone(), job5.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_scheduled(job3.clone());
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 1,
+                scheduled: 2,
+                running: 2,
+                ..Default::default()
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected =
+            BTreeSet::<JobId>::from([job1.clone(), job2.clone(), job3.clone(), job5.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_started(job3.clone());
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 1,
+                scheduled: 1,
+                running: 3,
+                ..Default::default()
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected =
+            BTreeSet::<JobId>::from([job1.clone(), job2.clone(), job3.clone(), job5.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_scheduled(job4.clone());
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 0,
+                scheduled: 2,
+                running: 3,
+                ..Default::default()
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([
+            job1.clone(),
+            job2.clone(),
+            job3.clone(),
+            job4.clone(),
+            job5.clone(),
+        ]);
+        assert_eq!(jobs, expected);
+
+        state.job_started(job4.clone());
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_none());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 0,
+                scheduled: 1,
+                running: 4,
+                ..Default::default()
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([
+            job1.clone(),
+            job2.clone(),
+            job3.clone(),
+            job4.clone(),
+            job5.clone(),
+        ]);
+        assert_eq!(jobs, expected);
+
+        state.job_canceled(&job2);
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
         assert!(state.last_finished_at().is_some());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 0,
+                scheduled: 0,
+                running: 4,
+                canceled: 1,
+                ..Default::default()
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected =
+            BTreeSet::<JobId>::from([job1.clone(), job3.clone(), job4.clone(), job5.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_timeout(&job3);
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_some());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 0,
+                scheduled: 0,
+                running: 3,
+                canceled: 1,
+                timeouts: 1,
+                errors: 0,
+                completed: 0
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([job1.clone(), job4.clone(), job5.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_error(&job4);
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_some());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 0,
+                scheduled: 0,
+                running: 2,
+                canceled: 1,
+                timeouts: 1,
+                errors: 1,
+                completed: 0
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([job1.clone(), job5.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_canceled(&job5);
+        assert_eq!(state.status(), TaskStatus::Running);
+        assert!(!state.is_task_finished());
+        assert!(state.last_finished_at().is_some());
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 0,
+                scheduled: 0,
+                running: 1,
+                canceled: 2,
+                timeouts: 1,
+                errors: 1,
+                completed: 0
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([job1.clone()]);
+        assert_eq!(jobs, expected);
+
+        state.job_completed(&job1);
+        assert_eq!(state.status(), TaskStatus::Finished);
+        assert!(state.is_task_finished());
+        assert!(state.last_finished_at().is_some());
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 1, canceled: 2, timeouts: 1, errors: 1, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"{}\" }}", DateTime::<Local>::from(state.last_finished_at().unwrap())));
+        assert_eq!(
+            state.statistics,
+            TaskStatistics {
+                waiting: 0,
+                scheduled: 0,
+                running: 0,
+                canceled: 2,
+                timeouts: 1,
+                errors: 1,
+                completed: 1
+            }
+        );
+
+        let jobs = state.jobs();
+        let expected = BTreeSet::<JobId>::from([]);
+        assert_eq!(jobs, expected);
     }
 
     #[test]
@@ -806,6 +1210,11 @@ mod test {
             task.clone().with_schedule(TaskSchedule::Once).schedule(),
             TaskSchedule::Once
         );
+        assert_eq!(
+            task.clone().with_timeout(Duration::from_secs(10)).timeout(),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(task.clone().timeout(), None);
         assert_eq!(task.status(), TaskStatus::New);
 
         let id = Uuid::new_v4();
@@ -830,9 +1239,13 @@ mod test {
 
     #[test]
     fn debug_formatter() {
-        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {})).with_id("TEST");
+        let task1 = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {})).with_id("TEST");
+        let task2 = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {}))
+            .with_id("TEST_WITH_TIMEOUT")
+            .with_timeout(Duration::from_secs(1));
 
-        assert_eq!(format!("{:?}", task), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, cancelled: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }} }}"));
+        assert_eq!(format!("{:?}", task1), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: None }}"));
+        assert_eq!(format!("{:?}", task2), format!("Task {{ id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: Some(1s) }}"));
 
         assert_eq!(
             format!("{}", CronSchedule::try_from("1 2 3 4 5").unwrap()),

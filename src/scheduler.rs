@@ -7,7 +7,7 @@ use crate::{
     executor::{Executor, JobExecutor},
     job::{Job, JobId, JobState},
     queue::{EventTimeQueue, Queue},
-    task::{Task, TaskId, TaskStatus},
+    task::{Task, TaskId, TaskStatistics, TaskStatus},
     ControlChannel, Error, Result,
 };
 use std::{
@@ -35,6 +35,8 @@ pub trait TaskScheduler {
     async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()>;
     /// Returns current status of the [`Task`] and removes the task from the scheduler if it's finished.
     async fn status(&self, id: &TaskId) -> Result<TaskStatus>;
+    /// Returns various statistics about the [`Task`] state. Please refer to the [`TaskStatistics`] for details.
+    async fn statistics(&self, id: &TaskId) -> Result<TaskStatistics>;
     /// Shuts down the scheduler with respect to [`ShutdownOpts`].
     async fn shutdown(self, opts: ShutdownOpts) -> Result<()>;
 }
@@ -52,6 +54,11 @@ pub trait TaskScheduler {
     ) -> impl std::future::Future<Output = Result<()>> + Send;
     /// Returns current status of the [`Task`] and removes the task from the scheduler if it's finished.
     fn status(&self, id: &TaskId) -> impl std::future::Future<Output = Result<TaskStatus>> + Send;
+    /// Returns various statistics about the [`Task`] state. Please refer to the [`TaskStatistics`] for details.
+    fn statistics(
+        &self,
+        id: &TaskId,
+    ) -> impl std::future::Future<Output = Result<TaskStatistics>> + Send;
     /// Shuts down the scheduler with respect to [`ShutdownOpts`].
     fn shutdown(self, opts: ShutdownOpts) -> impl std::future::Future<Output = Result<()>> + Send;
 }
@@ -146,13 +153,14 @@ pub trait TaskScheduler {
 /// }
 /// ```
 ///
+#[derive(Debug)]
 pub struct Scheduler {
     tasks: Arc<RwLock<HashMap<TaskId, Task>>>,
     channel: Sender<ChangeStateEvent>,
     handler: tokio::task::JoinHandle<Result<()>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum ChangeStateEvent {
     Shutdown(ShutdownOpts),
     EnqueueTask(Task),
@@ -160,7 +168,7 @@ enum ChangeStateEvent {
 }
 
 /// Type of `Tokio` runtime to use for jobs worker.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WorkerType {
     /// Use current runtime instead of creating new one.
     ///
@@ -179,7 +187,7 @@ pub enum WorkerType {
 }
 
 /// Thread number limit for [`Scheduler`] with [`MultiThread`](WorkerType::MultiThread) `Tokio` runtime
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RuntimeThreads {
     /// Limits number of threads to number of actual CPU Cores.
     #[default]
@@ -189,7 +197,7 @@ pub enum RuntimeThreads {
 }
 
 /// Limit of simultaneously running jobs per [`Scheduler`].
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WorkerParallelism {
     /// No limits, use the whole potential of your machine.
     Unlimited,
@@ -204,7 +212,7 @@ impl Default for WorkerParallelism {
 }
 
 /// Define [`Task`] cancellation behavior.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CancelOpts {
     /// Orphans task and lets it continue working (default).
     #[default]
@@ -214,7 +222,7 @@ pub enum CancelOpts {
 }
 
 /// Define how to shut down [`Scheduler`] with running tasks.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShutdownOpts {
     /// Lets running tasks continue working.
     IgnoreRunning,
@@ -228,7 +236,7 @@ pub enum ShutdownOpts {
 }
 
 /// Define parameters of orphaned task's garbage collector.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GarbageCollector {
     /// Don't collect garbage (default).
     #[default]
@@ -271,7 +279,7 @@ impl GarbageCollector {
 
         let to_remove: Vec<TaskId> = tasks
             .iter()
-            .filter(|(_id, task)| task.state.finished())
+            .filter(|(_id, task)| task.state.is_task_finished())
             .filter(|(_id, task)| {
                 task.state
                     .last_finished_at()
@@ -319,7 +327,7 @@ impl GarbageCollector {
 ///         .await
 /// }
 ///```
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SchedulerBuilder {
     worker_type: WorkerType,
     parallelism: WorkerParallelism,
@@ -455,7 +463,7 @@ impl Scheduler {
                                 let task_id = task.id.clone();
                                 let at = task.schedule.initial_run_time();
                                 queue.insert(Event::new(event_id, at)).await?;
-                                task.state.enqueued();
+                                task.state.task_enqueued();
                                 let mut tasks = tasks.write().await;
                                 tasks.insert(task_id, task);
                             },
@@ -490,15 +498,15 @@ impl Scheduler {
                         if let Some(task) = task {
                             let job_id = JobId::new(task.id());
                             let job = task.job.clone();
-                            let job = Job::new(job_id, job);
+                            let job = Job::new(job_id, job, task.timeout);
                             let job_id = executor.enqueue(job).await?;
                             jobs.insert(job_id.clone(), task.id.clone());
-                            task.state.scheduled(job_id);
+                            task.state.job_scheduled(job_id);
                             let at = task.schedule.after_start_run_time();
                             if let Some(at) = at {
                                 let event_id = task.id.clone();
                                 queue.insert(Event::new(event_id, at)).await?;
-                                task.state.enqueued();
+                                task.state.task_enqueued();
                             }
                         }
                         } else {
@@ -519,23 +527,31 @@ impl Scheduler {
                                     debug!(job_state = ?job_state, "job state changed");
                                     let mut at = None;
                                     match job_state {
-                                        JobState::Running => { task.state.started(job_id); },
+                                        JobState::Running => { task.state.job_started(job_id); },
                                         JobState::Completed => {
-                                            task.state.completed(&job_id);
+                                            task.state.job_completed(&job_id);
                                             at = task.schedule.after_finish_run_time();
                                         },
-                                        JobState::Cancelled => {
-                                            task.state.cancelled(&job_id);
+                                        JobState::Canceled => {
+                                            task.state.job_canceled(&job_id);
                                             at = task.schedule.after_finish_run_time();
                                         },
-                                        _ => {},
+                                        JobState::Timeout => {
+                                            task.state.job_timeout(&job_id);
+                                            at = task.schedule.after_finish_run_time();
+                                        },
+                                        JobState::Error => {
+                                            task.state.job_error(&job_id);
+                                            at = task.schedule.after_finish_run_time();
+                                        },
+                                        JobState::Pending | JobState::Starting => {},
                                     };
                                     if let Some(at) = at {
                                         let event_id = task.id.clone();
                                         queue.insert(Event::new(event_id, at)).await?;
-                                        task.state.enqueued();
+                                        task.state.task_enqueued();
                                     }
-                                    task.state.finished()
+                                    task.state.is_task_finished()
                                 } else {
                                     false
                                 }
@@ -611,7 +627,7 @@ impl TaskScheduler for Scheduler {
 
         if let Some(task) = task {
             let status = task.state.status();
-            if task.state.finished() {
+            if task.state.is_task_finished() {
                 debug!(task_id = %id, "remove finished task");
                 tasks.remove(id);
             }
@@ -619,6 +635,22 @@ impl TaskScheduler for Scheduler {
         }
 
         Err(Error::IncorrectTaskId(id.clone()))
+    }
+
+    /// Returns various statistics about scheduled the task.
+    ///
+    /// Please refer to the [`TaskStatistics`] documentation for details.
+    /// Returns [`Error::IncorrectTaskId`] if the task is not scheduled or cleaned by garbage collector.
+    async fn statistics(&self, id: &TaskId) -> Result<TaskStatistics> {
+        debug!(task_id = %id, "task statistics requested");
+        let tasks = self.tasks.read().await;
+        let task = tasks.get(id);
+
+        if let Some(task) = task {
+            Ok(task.statistics())
+        } else {
+            Err(Error::IncorrectTaskId(id.clone()))
+        }
     }
 
     /// Starts process of scheduler shutdown:
@@ -1180,20 +1212,30 @@ mod test {
                 tokio::time::sleep(Duration::from_secs(3)).await;
             })
         });
+        // Once work for 4s with 3s timeout
+        let task_4 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(4)).await;
+            })
+        })
+        .with_timeout(Duration::from_secs(3));
 
         let id_1 = scheduler.add(task_1).await.unwrap();
         let id_2 = scheduler.add(task_2).await.unwrap();
         let id_3 = scheduler.add(task_3).await.unwrap();
+        let id_4 = scheduler.add(task_4).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(2500)).await;
         assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
         assert!(scheduler.status(&id_2).await.is_err());
         assert_eq!(scheduler.status(&id_3).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id_4).await.unwrap(), TaskStatus::Running);
 
         tokio::time::sleep(Duration::from_millis(1000)).await;
         assert_eq!(scheduler.status(&id_1).await.unwrap(), TaskStatus::Running);
         assert!(scheduler.status(&id_2).await.is_err());
         assert!(scheduler.status(&id_3).await.is_err());
+        assert!(scheduler.status(&id_4).await.is_err());
 
         scheduler
             .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
@@ -1278,5 +1320,169 @@ mod test {
                 _ => unreachable!("failed with unexpected error"),
             },
         }
+    }
+
+    #[tokio::test]
+    async fn task_with_timeout() {
+        let scheduler = Scheduler::default();
+
+        // Once work for 2s, with 5s timeout
+        let task1 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        })
+        .with_id("OK")
+        .with_timeout(Duration::from_secs(5));
+
+        // Once work for 2s, with 1s timeout
+        let task2 = task1
+            .clone()
+            .with_id("FAILED")
+            .with_timeout(Duration::from_secs(1));
+
+        // Every 1s, with 2s duration and 1s timeout
+        let task3 = Task::new(TaskSchedule::Interval(Duration::from_secs(1)), |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        })
+        .with_id("FAILING")
+        .with_timeout(Duration::from_secs(1));
+
+        let id1 = scheduler.add(task1).await.unwrap();
+        let id2 = scheduler.add(task2).await.unwrap();
+        let id3 = scheduler.add(task3).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id2).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Running);
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id2).await.unwrap(), TaskStatus::Finished);
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Waiting);
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Finished);
+        assert!(scheduler.status(&id2).await.is_err());
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Running);
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        assert!(scheduler.status(&id1).await.is_err());
+        assert!(scheduler.status(&id2).await.is_err());
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Waiting);
+
+        let _ = scheduler
+            .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
+            .await;
+    }
+
+    #[tokio::test]
+    async fn task_cancellation() {
+        let scheduler = Scheduler::default();
+
+        let task1 = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            })
+        })
+        .with_id("OK");
+
+        let task2 = task1.clone().with_id("CANCELED KILLED");
+        let task3 = task1.clone().with_id("CANCELED IGNORED");
+
+        let id1 = scheduler.add(task1).await.unwrap();
+        let id2 = scheduler.add(task2).await.unwrap();
+        let id3 = scheduler.add(task3).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        assert_eq!(
+            scheduler.statistics(&id1).await.unwrap(),
+            TaskStatistics {
+                running: 1,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            scheduler.statistics(&id2).await.unwrap(),
+            TaskStatistics {
+                running: 1,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            scheduler.statistics(&id3).await.unwrap(),
+            TaskStatistics {
+                running: 1,
+                ..Default::default()
+            }
+        );
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id2).await.unwrap(), TaskStatus::Running);
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Running);
+
+        scheduler
+            .cancel(id2.clone(), CancelOpts::Kill)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(
+            scheduler.statistics(&id1).await.unwrap(),
+            TaskStatistics {
+                running: 1,
+                ..Default::default()
+            }
+        );
+        assert!(scheduler.statistics(&id2).await.is_err());
+        assert_eq!(
+            scheduler.statistics(&id3).await.unwrap(),
+            TaskStatistics {
+                running: 1,
+                ..Default::default()
+            }
+        );
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
+        assert!(scheduler.status(&id2).await.is_err());
+        assert_eq!(scheduler.status(&id3).await.unwrap(), TaskStatus::Running);
+
+        scheduler
+            .cancel(id3.clone(), CancelOpts::Ignore)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(
+            scheduler.statistics(&id1).await.unwrap(),
+            TaskStatistics {
+                running: 1,
+                ..Default::default()
+            }
+        );
+        assert!(scheduler.statistics(&id3).await.is_err());
+
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Running);
+        assert!(scheduler.status(&id3).await.is_err());
+
+        tokio::time::sleep(Duration::from_millis(400)).await;
+
+        assert_eq!(
+            scheduler.statistics(&id1).await.unwrap(),
+            TaskStatistics {
+                completed: 1,
+                ..Default::default()
+            }
+        );
+
+        assert_eq!(scheduler.status(&id1).await.unwrap(), TaskStatus::Finished);
+
+        assert!(scheduler.status(&id1).await.is_err());
+
+        let _ = scheduler
+            .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
+            .await;
     }
 }

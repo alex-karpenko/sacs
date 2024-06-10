@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+### Details
+#### Added
+- Implement Task with restricted execution time
+
+#### Changed
+- Improve Task state tracking and statistics
+
 ## [0.5.1] - 2024-06-03
 ### Details
 #### Added
@@ -31,7 +39,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.4.1] - 2024-04-29
 ### Details
-#### Changed
+#### Added
 - Implement Task::new_with_id method to create task with predefined Id by @Artem468 in [#5](https://github.com/alex-karpenko/sacs/pull/5)
 
 #### Fixed
@@ -41,7 +49,7 @@ All notable changes to this project will be documented in this file.
 * @Artem468 made their first contribution in [#5](https://github.com/alex-karpenko/sacs/pull/5)
 ## [0.4.0] - 2024-04-21
 ### Details
-#### Changed
+#### Added
 - Implement immediate garbage collector by @alex-karpenko in [#4](https://github.com/alex-karpenko/sacs/pull/4)
 
 #### Fixed
@@ -60,7 +68,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.0] - 2024-03-03
 ### Details
-#### Changed
+#### Added
 - Implement first draft v0.1 by @alex-karpenko in [#1](https://github.com/alex-karpenko/sacs/pull/1)
 
 #### Fixed
@@ -68,6 +76,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[unreleased]: https://github.com/alex-karpenko/sacs/compare/v0.5.1..HEAD
 [0.5.1]: https://github.com/alex-karpenko/sacs/compare/v0.5.0..v0.5.1
 [0.5.0]: https://github.com/alex-karpenko/sacs/compare/v0.4.2..v0.5.0
 [0.4.2]: https://github.com/alex-karpenko/sacs/compare/v0.4.1..v0.4.2

@@ -272,7 +272,7 @@ impl GarbageCollector {
 }
 
 impl GarbageCollector {
-    #[instrument("collect garbage", skip_all)]
+    #[instrument("collect garbage", skip_all, level = "debug")]
     async fn collect_garbage(tasks: Arc<RwLock<HashMap<TaskId, Task>>>, expire_after: Duration) {
         let mut tasks = tasks.write().await;
         let expired_at = SystemTime::now().checked_sub(expire_after).unwrap();
@@ -404,7 +404,7 @@ impl Scheduler {
         }
     }
 
-    #[instrument("scheduler loop", skip_all)]
+    #[instrument("scheduler loop", skip_all, level = "debug")]
     async fn work(
         worker_type: WorkerType,
         parallelism: WorkerParallelism,

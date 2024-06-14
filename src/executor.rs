@@ -53,7 +53,7 @@ impl Executor {
         }
     }
 
-    #[instrument("process pending jobs", skip_all)]
+    #[instrument("process pending jobs", skip_all, level = "debug")]
     async fn requeue_jobs(&self) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         // Nothing to execute
@@ -104,7 +104,7 @@ impl Default for Executor {
 }
 
 impl JobExecutor for Executor {
-    #[instrument("waiting for executor event", skip_all)]
+    #[instrument("waiting for executor event", skip_all, level = "debug")]
     async fn work(&self) -> Result<JobId> {
         select! {
             event = self.control_channel.receive() => {

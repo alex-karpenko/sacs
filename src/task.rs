@@ -375,15 +375,15 @@ impl Display for TaskId {
 /// ## Overview
 ///
 /// - `Once`: the simplest one-shot task without schedule.
-/// It starts immediately after adding to Scheduler and doesn't repeat after finishing.
+///   It starts immediately after adding to Scheduler and doesn't repeat after finishing.
 /// - `OnceDelayed`: The same as `Once` but it starts after specified delay.
 /// - `Interval`: this is the simplest repeatable task, scheduler starts it immediately after adding, waits for finish
-/// and starts the next instance after specified interval.
-/// So there can be a single working job only with this type of schedule.
+///   and starts the next instance after specified interval.
+///   So there can be a single working job only with this type of schedule.
 /// - `IntervalDelayed`: its behavior is similar to `Interval` but scheduler starts first job with some specified delay.
 /// - `Cron`: the most flexible schedule type which uses well-known cron [`expressions`](CronSchedule) to define time to run
-/// and [`CronOpts`] parameter which defines the behavior of task right after adding to scheduler (start first job immediately or
-/// strictly according to the schedule) and allows or restricts concurrent running of jobs.
+///   and [`CronOpts`] parameter which defines the behavior of task right after adding to scheduler (start first job immediately or
+///   strictly according to the schedule) and allows or restricts concurrent running of jobs.
 ///
 /// ## Examples
 ///
@@ -494,14 +494,13 @@ pub struct CronOpts {
 /// Each task in every moment of time has some determined state:
 /// - just created task which wasn't pushed to scheduler is `New`.
 /// - when scheduler got the task it plans when the task should be started and puts it to `Waiting`
-/// until time to run arrived.
+///   until time to run arrived.
 /// - when start time arrived,
-/// the scheduler posts job (instance of a task) to execution engine and moves it `Scheduled` state.
+///   the scheduler posts job (instance of a task) to execution engine and moves it `Scheduled` state.
 /// - when executor started the job (this moment depends on the amount of free execution resources),
-/// it moves the task to `Running` state.
+///   it moves the task to `Running` state.
 /// - when the task is completed, it may be rescheduled (if it's repeatable) and moved to `Waiting` or `Scheduled`,
-/// or may be `Finished`
-/// if that's kind of one-shot task.
+///   or may be `Finished` if that's kind of one-shot task.
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TaskStatus {
     /// Just created, not added to `Scheduler`.

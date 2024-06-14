@@ -91,7 +91,7 @@ impl Worker {
         }
     }
 
-    #[instrument("worker loop", skip_all)]
+    #[instrument("worker loop", skip_all, level = "debug")]
     async fn worker(
         executor_channel: Sender<ChangeExecutorStateEvent>,
         worker_channel: ControlChannel<ChangeStateEvent>,

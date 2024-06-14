@@ -148,7 +148,7 @@ impl Default for Queue {
 }
 
 impl EventTimeQueue for Queue {
-    #[instrument("waiting for queue event", skip_all)]
+    #[instrument("waiting for queue event", skip_all, level = "debug")]
     async fn next(&self) -> Result<Event> {
         loop {
             // Calculate sleep time for next loop iteration

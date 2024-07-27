@@ -1,3 +1,5 @@
+#![deny(unsafe_code, warnings, missing_docs)]
+
 //! # **SACS** - Simple Asynchronous Cron Scheduler
 //!
 //! `SACS` is easy to use, lightweight scheduler and executor of repeatable async tasks for `Tokio` runtime.
@@ -97,9 +99,10 @@ pub enum Error {
     /// Task with such `Id` doesn't exist
     #[error("there's no task with id `{0:?}`")]
     IncorrectTaskId(TaskId),
-    /// Invalid Cron expression provided during `Task` creation
+    /// Task with such `Id` already exists, duplicates isn't allowed
     #[error("there's already scheduled task with id `{0:?}`")]
     DuplicatedTaskId(TaskId),
+    /// Invalid Cron expression provided during `Task` creation
     #[error("cron expression is invalid")]
     InvalidCronExpression(#[from] cron::error::Error),
     /// Unable to receive change state event due to the closed channel or error

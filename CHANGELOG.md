@@ -2,10 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2] - 2024-07-27
+### Details
+#### Changed
+- Update dev dependencies by @alex-karpenko in [#25](https://github.com/alex-karpenko/sacs/pull/25)
+
 ## [0.6.1] - 2024-06-14
 ### Details
 #### Fixed
-- Update traces to use debug level for spans
+- Update traces to use debug level for spans by @alex-karpenko in [#23](https://github.com/alex-karpenko/sacs/pull/23)
 
 ## [0.6.0] - 2024-06-10
 ### Details
@@ -85,6 +90,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[0.6.2]: https://github.com/alex-karpenko/sacs/compare/v0.6.1..v0.6.2
 [0.6.1]: https://github.com/alex-karpenko/sacs/compare/v0.6.0..v0.6.1
 [0.6.0]: https://github.com/alex-karpenko/sacs/compare/v0.5.1..v0.6.0
 [0.5.1]: https://github.com/alex-karpenko/sacs/compare/v0.5.0..v0.5.1

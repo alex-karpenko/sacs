@@ -28,6 +28,7 @@ const SCHEDULER_CONTROL_CHANNEL_SIZE: usize = 1024;
 
 #[cfg(feature = "async-trait")]
 #[allow(async_fn_in_trait)]
+/// Base [`Scheduler`] behavior
 pub trait TaskScheduler {
     /// Posts new [`Task`] to the `Scheduler`.
     async fn add(&self, task: Task) -> Result<TaskId>;

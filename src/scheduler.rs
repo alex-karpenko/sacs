@@ -246,7 +246,9 @@ pub enum GarbageCollector {
     /// Run garbage collector every `interval`
     /// time and cleanup tasks which have been finished more than `expire_after` time ago.
     Periodic {
+        /// Maximum Time-to-live of the finished tasks' state.
         expire_after: Duration,
+        /// Interval between the garbage collector runs.
         interval: Duration,
     },
 }

@@ -1,3 +1,4 @@
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::WithExportConfig;
 use sacs::{
     job::JobId,
@@ -24,7 +25,7 @@ async fn init() {
 
 async fn init_tracing() {
     // Setup tracing layers
-    let telemetry = tracing_opentelemetry::layer().with_tracer(get_tracer().await);
+    let telemetry = tracing_opentelemetry::layer().with_tracer(get_tracer());
     let console_logger = tracing_subscriber::fmt::layer().compact();
     let env_filter = filter::EnvFilter::try_from_default_env()
         .or(filter::EnvFilter::try_new("info"))
@@ -40,7 +41,7 @@ async fn init_tracing() {
     tracing::subscriber::set_global_default(collector).unwrap();
 }
 
-async fn get_tracer() -> opentelemetry_sdk::trace::Tracer {
+fn get_tracer() -> opentelemetry_sdk::trace::Tracer {
     let otlp_endpoint = std::env::var("OPENTELEMETRY_ENDPOINT_URL")
         .unwrap_or(String::from(DEFAULT_OPENTELEMETRY_ENDPOINT_URL));
 
@@ -48,10 +49,12 @@ async fn get_tracer() -> opentelemetry_sdk::trace::Tracer {
         .tonic()
         .with_endpoint(otlp_endpoint);
 
-    let trace_config =
-        opentelemetry_sdk::trace::config().with_resource(opentelemetry_sdk::Resource::new(vec![
-            opentelemetry::KeyValue::new("service.name", "sacs-test-suite"),
-        ]));
+    let trace_config = opentelemetry_sdk::trace::Config::default().with_resource(
+        opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
+            "service.name",
+            "sacs-test-suite",
+        )]),
+    );
 
     opentelemetry_otlp::new_pipeline()
         .tracing()
@@ -59,6 +62,7 @@ async fn get_tracer() -> opentelemetry_sdk::trace::Tracer {
         .with_trace_config(trace_config)
         .install_batch(opentelemetry_sdk::runtime::Tokio)
         .unwrap()
+        .tracer("sacs-test-suite")
 }
 
 async fn basic_test_suite(

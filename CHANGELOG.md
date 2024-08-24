@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+### Details
+#### Changed
+- Improve tests quality by @alex-karpenko in [#26](https://github.com/alex-karpenko/sacs/pull/26)
+
 ## [0.6.2] - 2024-07-27
 ### Details
 #### Changed
@@ -90,6 +95,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[unreleased]: https://github.com/alex-karpenko/sacs/compare/v0.6.2..HEAD
 [0.6.2]: https://github.com/alex-karpenko/sacs/compare/v0.6.1..v0.6.2
 [0.6.1]: https://github.com/alex-karpenko/sacs/compare/v0.6.0..v0.6.1
 [0.6.0]: https://github.com/alex-karpenko/sacs/compare/v0.5.1..v0.6.0

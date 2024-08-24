@@ -17,7 +17,7 @@ use tracing::{debug, instrument};
 /// Default size of Queue control channel
 const QUEUE_CONTROL_CHANNEL_SIZE: usize = 1024;
 /// Time to sleep control loop if queue is empty, actually value doesn't matter
-const EMPTY_QUEUE_SLEEP_DURATION_SECONDS: u64 = 60 * 60;
+const EMPTY_QUEUE_SLEEP_DURATION_SECONDS: u64 = 3600;
 
 /// Events queue behavior
 pub trait EventTimeQueue: Debug {
@@ -125,15 +125,16 @@ impl Queue {
             }
 
             Ok(())
-        } else if ids.is_none() && times.is_none() {
-            // Event is absent in both indexes:
-            // it's strange (we try to delete non-existent event), but this is not an error.
-            debug!(?event, "event not found");
-            return Ok(());
-        } else {
+        } else if (ids.is_none() && times.is_some()) || (ids.is_some() && times.is_none()) {
             // There is some inconsistency in indexes - looks like a BUG
             debug!(?event, "inconsistent indexes discovered");
             return Err(Error::InconsistentQueueContent);
+        } else {
+            // Event is absent in both indexes:
+            // it's strange (we try to delete non-existent event), but this is not an error of the queue,
+            // it's rather an error at the calling side.
+            debug!(?event, "event not found");
+            return Ok(());
         }
     }
 }
@@ -278,6 +279,7 @@ impl EventTimeQueue for Queue {
 mod test {
     use super::*;
     use std::collections::HashSet;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn basic() {
@@ -433,5 +435,69 @@ mod test {
         assert!(next.is_some());
         let next = next.unwrap();
         assert!(matches!(next, Err(Error::ShutdownRequested)));
+    }
+
+    #[test]
+    fn queue_index_clear() {
+        let mut index = QueueIndex::new();
+
+        index.by_time.insert(SystemTime::now(), BTreeSet::new());
+        index.by_id.insert(Uuid::new_v4().into(), BTreeSet::new());
+
+        assert!(!index.by_id.is_empty());
+        assert!(!index.by_time.is_empty());
+
+        index.clear();
+        assert!(index.by_id.is_empty());
+        assert!(index.by_time.is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_event_from_queue() {
+        let queue = Queue::default();
+        let id = EventId::default();
+        let time = SystemTime::now();
+        let event = Event::new(id.clone(), time.clone());
+
+        queue.insert(event.clone()).await.unwrap();
+        {
+            let index = queue.index.read().await;
+            assert_eq!(index.by_id.len(), index.by_time.len());
+            assert_eq!(index.by_id.len(), 1);
+        }
+
+        queue.remove(&event).await.unwrap();
+        {
+            let index = queue.index.read().await;
+            assert_eq!(index.by_id.len(), index.by_time.len());
+            assert_eq!(index.by_id.len(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn remove_event_from_inconsistent_queue() {
+        let queue = Queue::default();
+        let id = EventId::default();
+        let time = SystemTime::now();
+        let event = Event::new(id.clone(), time.clone());
+
+        queue.insert(event.clone()).await.unwrap();
+        {
+            let index = queue.index.read().await;
+            assert_eq!(index.by_id.len(), index.by_time.len());
+            assert_eq!(index.by_id.len(), 1);
+        }
+
+        {
+            let mut index = queue.index.write().await;
+            index.by_id.remove(&id);
+        }
+
+        let result = queue.remove(&event).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.err().unwrap(),
+            Error::InconsistentQueueContent
+        ));
     }
 }

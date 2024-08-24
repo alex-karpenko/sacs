@@ -457,7 +457,7 @@ mod test {
         let queue = Queue::default();
         let id = EventId::default();
         let time = SystemTime::now();
-        let event = Event::new(id.clone(), time.clone());
+        let event = Event::new(id.clone(), time);
 
         queue.insert(event.clone()).await.unwrap();
         {
@@ -479,7 +479,7 @@ mod test {
         let queue = Queue::default();
         let id = EventId::default();
         let time = SystemTime::now();
-        let event = Event::new(id.clone(), time.clone());
+        let event = Event::new(id.clone(), time);
 
         queue.insert(event.clone()).await.unwrap();
         {

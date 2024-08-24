@@ -1488,4 +1488,10 @@ mod test {
             .shutdown(ShutdownOpts::CancelTasks(CancelOpts::Kill))
             .await;
     }
+
+    #[test]
+    fn default_garbage_collector_value_should_be_disabled() {
+        assert_eq!(GarbageCollector::disabled(), GarbageCollector::default());
+        assert_eq!(GarbageCollector::default(), GarbageCollector::Disabled);
+    }
 }

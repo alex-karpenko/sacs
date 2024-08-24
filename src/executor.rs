@@ -335,4 +335,38 @@ mod test {
             }
         );
     }
+
+    #[tokio::test]
+    async fn executor_jobs_state_clear() {
+        let mut state = ExecutorJobsState {
+            pending: VecDeque::new(),
+            state: HashMap::new(),
+        };
+
+        // Create task and extract job form it
+        let task = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            })
+        });
+        let job = task.job.clone();
+        let job_id = JobId::new("task id");
+        let job = Job::new(job_id.clone(), job, None);
+
+        // Push task and job to executor state
+        state
+            .state
+            .insert(JobId::new(task.id()), JobState::Starting);
+
+        state.pending.push_back(job);
+
+        // Assert it's present
+        assert!(!state.state.is_empty());
+        assert!(!state.pending.is_empty());
+
+        // Assert clearing
+        state.clear();
+        assert!(state.state.is_empty());
+        assert!(state.pending.is_empty());
+    }
 }

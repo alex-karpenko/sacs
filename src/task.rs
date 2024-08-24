@@ -574,11 +574,10 @@ impl TaskState {
             TaskStatus::Scheduled
         } else if self.statistics.waiting > 0 {
             TaskStatus::Waiting
-        } else if (self.statistics.completed
-            + self.statistics.canceled
-            + self.statistics.timeouts
-            + self.statistics.errors)
-            > 0
+        } else if self.statistics.completed > 0
+            || self.statistics.canceled > 0
+            || self.statistics.timeouts > 0
+            || self.statistics.errors > 0
         {
             TaskStatus::Finished
         } else {
@@ -653,11 +652,10 @@ impl TaskState {
         self.statistics.waiting == 0
             && self.statistics.scheduled == 0
             && self.statistics.running == 0
-            && (self.statistics.completed
-                + self.statistics.canceled
-                + self.statistics.timeouts
-                + self.statistics.errors)
-                > 0
+            && (self.statistics.completed > 0
+                || self.statistics.canceled > 0
+                || self.statistics.timeouts > 0
+                || self.statistics.errors > 0)
             && self.scheduled_jobs.is_empty()
             && self.running_jobs.is_empty()
     }
@@ -1234,6 +1232,27 @@ mod test {
             CronSchedule::try_from("1 2 3 4 5").unwrap(),
             CronSchedule::try_from(&String::from("1 2 3 4 5")).unwrap()
         );
+    }
+
+    #[test]
+    fn task_status_reflects_real_task_state() {
+        let mut task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {}));
+        let task_id = task.id();
+        let job_id = JobId::new(task_id);
+
+        assert_eq!(task.status(), TaskStatus::New);
+
+        task.state.task_enqueued();
+        assert_eq!(task.status(), TaskStatus::Waiting);
+
+        task.state.job_scheduled(job_id.clone());
+        assert_eq!(task.status(), TaskStatus::Scheduled);
+
+        task.state.job_started(job_id.clone());
+        assert_eq!(task.status(), TaskStatus::Running);
+
+        task.state.job_completed(&job_id);
+        assert_eq!(task.status(), TaskStatus::Finished);
     }
 
     #[test]

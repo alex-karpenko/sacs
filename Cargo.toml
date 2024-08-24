@@ -18,6 +18,7 @@ exclude = [
     "Cargo.lock",
     "target/**",
     ".gitignore",
+    "mutants.*/**",
 ]
 
 [dependencies]

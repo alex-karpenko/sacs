@@ -1,0 +1,4 @@
+additional_cargo_args = ["--all-features"]
+exclude_re = [
+    "src/scheduler.rs:260:9: replace GarbageCollector::disabled -> Self with Default::default()",
+]

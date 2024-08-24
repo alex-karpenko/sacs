@@ -10,7 +10,7 @@ license = "MIT"
 name = "sacs"
 readme = "README.md"
 repository = "https://github.com/alex-karpenko/sacs"
-version = "0.6.2"
+version = "0.6.3"
 exclude = [
     ".github/**",
     ".vscode/**",

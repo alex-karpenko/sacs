@@ -368,12 +368,11 @@ impl Display for TaskId {
     }
 }
 
-/// Defines task's schedule with parameters among five types: [`Once`](TaskSchedule::Once),
-/// [`OnceDelayed`](TaskSchedule::OnceDelayed), [`Interval`](TaskSchedule::Interval),
-/// [`IntervalDelayed`](TaskSchedule::IntervalDelayed) and [`Cron`](TaskSchedule::Cron).
+/// Defines task's schedule with parameters.
 ///
 /// ## Overview
 ///
+/// Possible schedule types are:
 /// - `Once`: the simplest one-shot task without schedule.
 ///   It starts immediately after adding to Scheduler and doesn't repeat after finishing.
 /// - `OnceDelayed`: The same as `Once` but it starts after specified delay.

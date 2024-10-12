@@ -456,9 +456,7 @@ impl TaskSchedule {
     }
     pub(crate) fn after_finish_run_time(&self) -> Option<SystemTime> {
         match self {
-            TaskSchedule::Interval(interval) => {
-                Some(SystemTime::now().checked_add(*interval)?)
-            }
+            TaskSchedule::Interval(interval) => Some(SystemTime::now().checked_add(*interval)?),
             TaskSchedule::IntervalDelayed(interval, _delay) => {
                 Some(SystemTime::now().checked_add(*interval)?)
             }

@@ -456,11 +456,9 @@ impl TaskSchedule {
     }
     pub(crate) fn after_finish_run_time(&self) -> Option<SystemTime> {
         match self {
-            TaskSchedule::Interval(interval) => {
-                Some(SystemTime::now().checked_add(*interval).unwrap())
-            }
+            TaskSchedule::Interval(interval) => Some(SystemTime::now().checked_add(*interval)?),
             TaskSchedule::IntervalDelayed(interval, _delay) => {
-                Some(SystemTime::now().checked_add(*interval).unwrap())
+                Some(SystemTime::now().checked_add(*interval)?)
             }
             TaskSchedule::Once => None,
             TaskSchedule::OnceDelayed(_) => None,
@@ -528,7 +526,7 @@ pub struct TaskStatistics {
     pub completed: usize,
     /// Number of canceled jobs.
     pub canceled: usize,
-    /// Number of jobs killed because run time limit exceeded.
+    /// Number of jobs killed because the run time limit exceeded.
     pub timeouts: usize,
     /// Number of jobs finished unsuccessfully because of runtime errors.
     pub errors: usize,

@@ -48,14 +48,14 @@ uuid = { version = "1.8.0", features = ["fast-rng", "v4"] }
 async-trait = []
 
 [dev-dependencies]
-opentelemetry = { version = "0.24.0", features = ["trace", "logs"] }
-opentelemetry_sdk = { version = "0.24.1", features = ["rt-tokio", "tokio"] }
-opentelemetry-otlp = { version = "0.17.0", features = [
+opentelemetry = { version = "0.26.0", features = ["trace", "logs"] }
+opentelemetry_sdk = { version = "0.26.0", features = ["rt-tokio", "tokio"] }
+opentelemetry-otlp = { version = "0.26.0", features = [
     "tokio",
     "trace",
     "tonic",
     "grpc-tonic",
 ] }
-tracing-opentelemetry = "0.25.0"
+tracing-opentelemetry = "0.27.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
-tonic = { version = "0.12.1" }
+tonic = { version = "0.12.3" }

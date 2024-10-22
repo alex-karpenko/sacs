@@ -73,11 +73,7 @@ impl Executor {
                     })
                     .count();
 
-                if running < limit {
-                    limit - running
-                } else {
-                    0
-                }
+                limit.saturating_sub(running)
             }
         };
 

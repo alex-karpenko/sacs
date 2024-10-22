@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.4] - 2024-10-22
+### Details
+#### Changed
+- Update dev tracing dependencies to the latest versions by @alex-karpenko in [#28](https://github.com/alex-karpenko/sacs/pull/28)
+
+#### Fixed
+- Fix lint warnings by @alex-karpenko in [#29](https://github.com/alex-karpenko/sacs/pull/29)
+
 ## [0.6.3] - 2024-09-06
 ### Details
 #### Changed
@@ -98,6 +106,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[0.6.4]: https://github.com/alex-karpenko/sacs/compare/v0.6.3..v0.6.4
 [0.6.3]: https://github.com/alex-karpenko/sacs/compare/v0.6.2..v0.6.3
 [0.6.2]: https://github.com/alex-karpenko/sacs/compare/v0.6.1..v0.6.2
 [0.6.1]: https://github.com/alex-karpenko/sacs/compare/v0.6.0..v0.6.1

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2024-11-22
+### Details
+#### Breaking changes
+- Update dependencies, cron v0.13 and thiserror v2.0 by @alex-karpenko
+
+#### Changed
+
 ## [0.6.4] - 2024-10-22
 ### Details
 #### Changed
@@ -77,6 +84,7 @@ All notable changes to this project will be documented in this file.
 
 ## New Contributors
 * @Artem468 made their first contribution in [#5](https://github.com/alex-karpenko/sacs/pull/5)
+
 ## [0.4.0] - 2024-04-21
 ### Details
 #### Added
@@ -106,6 +114,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[0.7.0]: https://github.com/alex-karpenko/sacs/compare/v0.6.4..v0.7.0
 [0.6.4]: https://github.com/alex-karpenko/sacs/compare/v0.6.3..v0.6.4
 [0.6.3]: https://github.com/alex-karpenko/sacs/compare/v0.6.2..v0.6.3
 [0.6.2]: https://github.com/alex-karpenko/sacs/compare/v0.6.1..v0.6.2

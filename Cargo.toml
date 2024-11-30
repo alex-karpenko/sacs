@@ -10,12 +10,12 @@ license = "MIT"
 name = "sacs"
 readme = "README.md"
 repository = "https://github.com/alex-karpenko/sacs"
-version = "0.6.4"
+version = "0.6.5"
 exclude = [".github/**", ".vscode/**", "TODO.md", "Cargo.lock", "target/**", ".gitignore", "mutants.*/**"]
 
 [dependencies]
 chrono = { version = "0.4.38", default-features = false, features = ["std"] }
-cron = "0.12.1"
+cron = "0.13.0"
 futures = { version = "0.3.30", default-features = false, features = ["alloc", "std", "async-await"] }
 thiserror = "1.0.59"
 tokio = { version = "1.37.0", features = ["time", "macros", "sync", "signal", "rt", "rt-multi-thread"] }
@@ -26,9 +26,9 @@ uuid = { version = "1.8.0", features = ["fast-rng", "v4"] }
 async-trait = []
 
 [dev-dependencies]
-opentelemetry = { version = "0.26.0", features = ["trace", "logs"] }
-opentelemetry_sdk = { version = "0.26.0", features = ["rt-tokio", "tokio"] }
-opentelemetry-otlp = { version = "0.26.0", features = ["tokio", "trace", "tonic", "grpc-tonic"] }
-tracing-opentelemetry = "0.27.0"
+opentelemetry = { version = "0.27.0", features = ["trace", "logs"] }
+opentelemetry_sdk = { version = "0.27.0", features = ["rt-tokio", "tokio"] }
+opentelemetry-otlp = { version = "0.27.0", features = ["tokio", "trace", "tonic", "grpc-tonic"] }
+tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 tonic = { version = "0.12.3" }

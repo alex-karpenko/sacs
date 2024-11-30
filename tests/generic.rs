@@ -45,23 +45,18 @@ fn get_tracer() -> opentelemetry_sdk::trace::Tracer {
     let otlp_endpoint = std::env::var("OPENTELEMETRY_ENDPOINT_URL")
         .unwrap_or(String::from(DEFAULT_OPENTELEMETRY_ENDPOINT_URL));
 
-    let otlp_exporter = opentelemetry_otlp::new_exporter()
-        .tonic()
-        .with_endpoint(otlp_endpoint);
+    let otlp_exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(otlp_endpoint)
+        .build()
+        .unwrap();
 
-    let trace_config = opentelemetry_sdk::trace::Config::default().with_resource(
-        opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
-            "service.name",
-            "sacs-test-suite",
-        )]),
-    );
-
-    opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(otlp_exporter)
-        .with_trace_config(trace_config)
-        .install_batch(opentelemetry_sdk::runtime::Tokio)
-        .unwrap()
+    opentelemetry_sdk::trace::TracerProvider::builder()
+        .with_batch_exporter(otlp_exporter, opentelemetry_sdk::runtime::Tokio)
+        .with_resource(opentelemetry_sdk::Resource::new(vec![
+            opentelemetry::KeyValue::new("service.name", "sacs-test-suite"),
+        ]))
+        .build()
         .tracer("sacs-test-suite")
 }
 

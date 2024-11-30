@@ -1,3 +1,4 @@
+use ntest::timeout;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::WithExportConfig;
 use sacs::{
@@ -187,6 +188,7 @@ async fn unlimited_workers(worker_type: WorkerType) {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn single_worker_current_runtime() {
     init().await;
     let span = debug_span!("single worker current runtime");
@@ -196,6 +198,7 @@ async fn single_worker_current_runtime() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn single_worker_current_thread() {
     init().await;
     let span = debug_span!("single worker current thread");
@@ -205,6 +208,7 @@ async fn single_worker_current_thread() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn single_worker_two_threads() {
     init().await;
     let span = debug_span!("single worker two threads");
@@ -214,6 +218,7 @@ async fn single_worker_two_threads() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn single_worker_all_cores_threads() {
     init().await;
     let span = debug_span!("single worker all cores threads");
@@ -223,6 +228,7 @@ async fn single_worker_all_cores_threads() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn four_workers_current_runtime() {
     init().await;
     let span = debug_span!("four workers current runtime");
@@ -232,6 +238,7 @@ async fn four_workers_current_runtime() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn four_workers_current_thread() {
     init().await;
     let span = debug_span!("four workers current thread");
@@ -241,6 +248,7 @@ async fn four_workers_current_thread() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn four_workers_two_threads() {
     init().await;
     let span = debug_span!("four workers two threads");
@@ -250,6 +258,7 @@ async fn four_workers_two_threads() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn four_workers_all_cores_threads() {
     init().await;
     let span = debug_span!("four workers all cores threads");
@@ -259,6 +268,7 @@ async fn four_workers_all_cores_threads() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn unlimited_workers_current_runtime() {
     init().await;
     let span = debug_span!("unlimited workers current runtime");
@@ -268,6 +278,7 @@ async fn unlimited_workers_current_runtime() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn unlimited_workers_current_thread() {
     init().await;
     let span = debug_span!("unlimited workers current thread");
@@ -277,6 +288,7 @@ async fn unlimited_workers_current_thread() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn unlimited_workers_two_threads() {
     init().await;
     let span = debug_span!("unlimited workers two threads");
@@ -286,6 +298,7 @@ async fn unlimited_workers_two_threads() {
 }
 
 #[tokio::test]
+#[timeout(30000)]
 async fn unlimited_workers_all_cores_threads() {
     init().await;
     let span = debug_span!("unlimited workers all cores threads");

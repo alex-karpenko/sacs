@@ -32,3 +32,4 @@ opentelemetry-otlp = { version = "0.27.0", features = ["tokio", "trace", "tonic"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 tonic = { version = "0.12.3" }
+ntest = "0.9.3"

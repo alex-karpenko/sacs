@@ -800,6 +800,117 @@ mod test {
     }
 
     #[test]
+    fn task_state_finished_status_completed() {
+        let job = JobId::new("job");
+        let mut state = TaskState::default();
+        assert_eq!(state.status(), TaskStatus::New);
+
+        state.task_enqueued();
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Waiting);
+
+        state.job_scheduled(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Scheduled);
+
+        state.job_started(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Running);
+
+        state.job_completed(&job);
+        assert!(state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Finished);
+    }
+
+    #[test]
+    fn task_state_finished_status_canceled_started() {
+        let job = JobId::new("job");
+        let mut state = TaskState::default();
+        assert_eq!(state.status(), TaskStatus::New);
+
+        state.task_enqueued();
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Waiting);
+
+        state.job_scheduled(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Scheduled);
+
+        state.job_started(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Running);
+
+        state.job_canceled(&job);
+        assert!(state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Finished);
+    }
+
+    #[test]
+    fn task_state_finished_status_canceled_scheduled() {
+        let job = JobId::new("job");
+        let mut state = TaskState::default();
+        assert_eq!(state.status(), TaskStatus::New);
+
+        state.task_enqueued();
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Waiting);
+
+        state.job_scheduled(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Scheduled);
+
+        state.job_canceled(&job);
+        assert!(state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Finished);
+    }
+
+    #[test]
+    fn task_state_finished_status_timeout() {
+        let job = JobId::new("job");
+        let mut state = TaskState::default();
+        assert_eq!(state.status(), TaskStatus::New);
+
+        state.task_enqueued();
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Waiting);
+
+        state.job_scheduled(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Scheduled);
+
+        state.job_started(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Running);
+
+        state.job_timeout(&job);
+        assert!(state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Finished);
+    }
+
+    #[test]
+    fn task_state_finished_status_error() {
+        let job = JobId::new("job");
+        let mut state = TaskState::default();
+        assert_eq!(state.status(), TaskStatus::New);
+
+        state.task_enqueued();
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Waiting);
+
+        state.job_scheduled(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Scheduled);
+
+        state.job_started(job.clone());
+        assert!(!state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Running);
+
+        state.job_error(&job);
+        assert!(state.is_task_finished());
+        assert_eq!(state.status(), TaskStatus::Finished);
+    }
+
+    #[test]
     fn task_state_transition() {
         let job1 = JobId::new("task1");
         let job2 = JobId::new("task2");

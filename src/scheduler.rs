@@ -690,6 +690,8 @@ impl TaskScheduler for Scheduler {
 
 #[cfg(test)]
 mod test {
+    use ntest::timeout;
+
     use super::*;
     use crate::task::{CronOpts, TaskSchedule};
     use std::time::UNIX_EPOCH;
@@ -737,6 +739,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(10000)]
     async fn once_1_worker() {
         let schedules: Vec<TaskSchedule> =
             Vec::from([TaskSchedule::Once, TaskSchedule::Once, TaskSchedule::Once]);
@@ -768,6 +771,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(10000)]
     async fn once_2_workers() {
         let schedules: Vec<TaskSchedule> = Vec::from([
             TaskSchedule::Once,
@@ -811,6 +815,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(10000)]
     async fn once_unlimited_workers() {
         let schedules: Vec<TaskSchedule> = Vec::from([
             TaskSchedule::Once,
@@ -856,6 +861,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(20000)]
     async fn cron() {
         let schedules: Vec<TaskSchedule> = Vec::from([
             TaskSchedule::Cron("*/2 * * * * *".try_into().unwrap(), CronOpts::default()),
@@ -918,6 +924,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(20000)]
     async fn cron_at_start() {
         let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::Cron(
             "*/5 * * * * *".try_into().unwrap(),
@@ -958,6 +965,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(20000)]
     async fn cron_non_concurrent() {
         let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::Cron(
             "*/5 * * * * *".try_into().unwrap(),
@@ -998,6 +1006,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(20000)]
     async fn cron_concurrent() {
         tracing_subscriber::fmt::init();
         let schedules: Vec<TaskSchedule> = Vec::from([TaskSchedule::Cron(
@@ -1047,6 +1056,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(10000)]
     async fn once_delayed_4_workers() {
         let schedules: Vec<TaskSchedule> = Vec::from([
             TaskSchedule::Once,
@@ -1088,6 +1098,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(10000)]
     async fn interval_4_workers() {
         let schedules: Vec<TaskSchedule> = Vec::from([
             TaskSchedule::Interval(Duration::from_secs(3)),
@@ -1139,6 +1150,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(10000)]
     async fn garbage_collector_periodic() {
         let scheduler = SchedulerBuilder::new()
             .garbage_collector(GarbageCollector::periodic(
@@ -1192,6 +1204,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(5000)]
     async fn garbage_collector_immediate() {
         let scheduler = SchedulerBuilder::new()
             .garbage_collector(GarbageCollector::immediate())
@@ -1247,6 +1260,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(5000)]
     async fn reject_duplicated_task() {
         let scheduler = SchedulerBuilder::new()
             .worker_type(WorkerType::CurrentThread)
@@ -1285,6 +1299,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(5000)]
     async fn shutdown_with_timeout() {
         let scheduler = Scheduler::default();
 
@@ -1326,6 +1341,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(5000)]
     async fn task_with_timeout() {
         let scheduler = Scheduler::default();
 
@@ -1383,6 +1399,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(5000)]
     async fn task_cancellation() {
         let scheduler = Scheduler::default();
 
@@ -1493,5 +1510,106 @@ mod test {
     fn default_garbage_collector_value_should_be_disabled() {
         assert_eq!(GarbageCollector::disabled(), GarbageCollector::default());
         assert_eq!(GarbageCollector::default(), GarbageCollector::Disabled);
+    }
+
+    #[test]
+    fn scheduler_builder_should_provide_default_values() {
+        let builder = SchedulerBuilder::new();
+        assert_eq!(builder.worker_type, WorkerType::CurrentRuntime);
+        assert_eq!(builder.garbage_collector, GarbageCollector::Disabled);
+        assert_eq!(builder.parallelism, WorkerParallelism::Limited(16));
+    }
+
+    #[test]
+    fn scheduler_builder_should_provide_custom_worker_type() {
+        let builder = SchedulerBuilder::new();
+        assert_eq!(builder.worker_type, WorkerType::CurrentRuntime);
+        assert_eq!(
+            builder
+                .clone()
+                .worker_type(WorkerType::CurrentThread)
+                .worker_type,
+            WorkerType::CurrentThread
+        );
+        assert_eq!(
+            builder
+                .clone()
+                .worker_type(WorkerType::MultiThread(RuntimeThreads::CpuCores))
+                .worker_type,
+            WorkerType::MultiThread(RuntimeThreads::CpuCores)
+        );
+        assert_eq!(
+            builder
+                .worker_type(WorkerType::MultiThread(RuntimeThreads::Limited(8)))
+                .worker_type,
+            WorkerType::MultiThread(RuntimeThreads::Limited(8))
+        );
+    }
+
+    #[test]
+    fn scheduler_builder_should_provide_custom_garbage_collector() {
+        let builder = SchedulerBuilder::new();
+        assert_eq!(builder.garbage_collector, GarbageCollector::Disabled);
+        assert_eq!(
+            builder
+                .clone()
+                .garbage_collector(GarbageCollector::Immediate)
+                .garbage_collector,
+            GarbageCollector::Immediate
+        );
+        assert_eq!(
+            builder
+                .clone()
+                .garbage_collector(GarbageCollector::immediate())
+                .garbage_collector,
+            GarbageCollector::Immediate
+        );
+
+        assert_eq!(
+            builder
+                .clone()
+                .garbage_collector(GarbageCollector::Periodic {
+                    expire_after: Duration::from_secs(30),
+                    interval: Duration::from_secs(10)
+                })
+                .garbage_collector,
+            GarbageCollector::Periodic {
+                expire_after: Duration::from_secs(30),
+                interval: Duration::from_secs(10)
+            }
+        );
+        assert_eq!(
+            builder
+                .clone()
+                .garbage_collector(GarbageCollector::periodic(
+                    Duration::from_secs(120),
+                    Duration::from_millis(1000)
+                ))
+                .garbage_collector,
+            GarbageCollector::Periodic {
+                expire_after: Duration::from_secs(120),
+                interval: Duration::from_millis(1000)
+            }
+        );
+    }
+
+    #[test]
+    fn scheduler_builder_should_provide_custom_parallelism() {
+        let builder = SchedulerBuilder::new();
+        assert_eq!(builder.parallelism, WorkerParallelism::Limited(16));
+        assert_eq!(
+            builder
+                .clone()
+                .parallelism(WorkerParallelism::Limited(8))
+                .parallelism,
+            WorkerParallelism::Limited(8)
+        );
+        assert_eq!(
+            builder
+                .clone()
+                .parallelism(WorkerParallelism::Unlimited)
+                .parallelism,
+            WorkerParallelism::Unlimited
+        );
     }
 }

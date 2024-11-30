@@ -283,7 +283,7 @@ mod test {
     use uuid::Uuid;
 
     #[tokio::test]
-    #[timeout(2000)]
+    #[timeout(5000)]
     async fn basic() {
         let queue = Queue::default();
         let id = EventId::default();

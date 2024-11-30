@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.5] - 2024-11-30
+### Details
+#### Fixed
+- Get rid of deprecated tracing method in tests
+
 ## [0.6.4] - 2024-10-22
 ### Details
 #### Changed
@@ -106,6 +111,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[0.6.5]: https://github.com/alex-karpenko/sacs/compare/v0.6.4..v0.6.5
 [0.6.4]: https://github.com/alex-karpenko/sacs/compare/v0.6.3..v0.6.4
 [0.6.3]: https://github.com/alex-karpenko/sacs/compare/v0.6.2..v0.6.3
 [0.6.2]: https://github.com/alex-karpenko/sacs/compare/v0.6.1..v0.6.2

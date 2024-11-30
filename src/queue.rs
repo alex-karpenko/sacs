@@ -278,10 +278,12 @@ impl EventTimeQueue for Queue {
 #[cfg(test)]
 mod test {
     use super::*;
+    use ntest::timeout;
     use std::collections::HashSet;
     use uuid::Uuid;
 
     #[tokio::test]
+    #[timeout(5000)]
     async fn basic() {
         let queue = Queue::default();
         let id = EventId::default();
@@ -323,6 +325,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(5000)]
     async fn insert_remove() {
         let queue = Queue::default();
         let id_1 = EventId::default();
@@ -375,6 +378,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[timeout(1000)]
     async fn push_pop() {
         let queue = Queue::default();
         let id_1 = EventId::default();

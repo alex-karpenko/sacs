@@ -1,3 +1,6 @@
 additional_cargo_args = ["--all-features"]
 cap_lints = true
-exclude_re = ["src/scheduler.rs:260:9: replace GarbageCollector::disabled -> Self with Default::default()"]
+exclude_re = [
+    # "disabled" is default value
+    "src/scheduler.rs:260:9: replace GarbageCollector::disabled -> Self with Default::default()",
+]

@@ -51,16 +51,11 @@ fn get_tracer() -> opentelemetry_sdk::trace::Tracer {
         .build()
         .unwrap();
 
-    let trace_config = opentelemetry_sdk::trace::Config::default().with_resource(
-        opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
-            "service.name",
-            "sacs-test-suite",
-        )]),
-    );
-
     opentelemetry_sdk::trace::TracerProvider::builder()
         .with_batch_exporter(otlp_exporter, opentelemetry_sdk::runtime::Tokio)
-        .with_config(trace_config)
+        .with_resource(opentelemetry_sdk::Resource::new(vec![
+            opentelemetry::KeyValue::new("service.name", "sacs-test-suite"),
+        ]))
         .build()
         .tracer("sacs-test-suite")
 }

@@ -43,3 +43,12 @@ jobs:
         run: |
           cargo clippy -F "${{ matrix.features }}" -- -D warnings
           cargo clippy --tests -F "${{ matrix.features }}" -- -D warnings
+
+  semver-checks:
+    runs-on: ubuntu-latest
+    needs: ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check semver
+        uses: obi1kenobi/cargo-semver-checks-action@v2

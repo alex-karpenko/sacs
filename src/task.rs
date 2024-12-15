@@ -405,6 +405,7 @@ impl Display for TaskId {
 /// ```
 ///
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)] // TODO: refactor to get rid of large enum in stack
 pub enum TaskSchedule {
     /// Starts the job immediately and runs it once (no repetitions).
     Once,
@@ -676,6 +677,8 @@ impl TaskState {
 ///
 /// For more information about valid cron expressions,
 /// please refer to [cron-lite](https://docs.rs/cron-lite/) crate documentation.
+///
+/// It's possible to use cron expression with timezone if `tz` feature is enabled.
 ///
 /// ## Examples
 ///

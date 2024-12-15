@@ -16,9 +16,6 @@ jobs:
           - stable
           - beta
           - 1.75.0
-        features:
-          - ""
-          - async-trait
 
     steps:
       - uses: actions/checkout@v4
@@ -29,20 +26,35 @@ jobs:
           components: rustfmt,clippy
 
       - name: Build
-        run: cargo build -F "${{ matrix.features }}"
+        run: cargo build
 
       - name: Test
         env:
           CI: true
-        run: cargo test -F "${{ matrix.features }}"
+        run: cargo test --all-features
 
       - name: Fmt
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: |
-          cargo clippy -F "${{ matrix.features }}" -- -D warnings
-          cargo clippy --tests -F "${{ matrix.features }}" -- -D warnings
+        run: cargo clippy --all all-features -- -D warnings
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack
+
+      - name: Check feature-powerset
+        run: cargo hack check --no-dev-deps --feature-powerset
+
+      - name: Check each-feature
+        run: cargo hack check --no-dev-deps --each-feature
+
+      - name: Tests feature-powerset
+        run: cargo hack test --feature-powerset
+
+      - name: Tests each-feature
+        run: cargo hack test --each-feature
 
   semver-checks:
     runs-on: ubuntu-latest

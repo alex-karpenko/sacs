@@ -56,6 +56,9 @@
 //!     scheduler.shutdown(ShutdownOpts::WaitForFinish).await
 //! }
 //! ```
+//!
+//! # Feature flags
+//! - `tz` - enables cron schedules with timezone, see [`cron-lite`](https://docs.rs/cron-lite/) documentation for details.
 
 mod event;
 mod executor;

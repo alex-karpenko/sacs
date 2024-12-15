@@ -56,6 +56,9 @@
 //!     scheduler.shutdown(ShutdownOpts::WaitForFinish).await
 //! }
 //! ```
+//!
+//! # Feature flags
+//! - `tz` - enables cron schedules with timezone, see [`cron-lite`](https://docs.rs/cron-lite/) documentation for details.
 
 mod event;
 mod executor;
@@ -104,7 +107,7 @@ pub enum Error {
     DuplicatedTaskId(TaskId),
     /// Invalid Cron expression provided during `Task` creation
     #[error("cron expression is invalid")]
-    InvalidCronExpression(#[from] cron::error::Error),
+    InvalidCronExpression(#[from] cron_lite::error::CronError),
     /// Unable to receive change state event due to the closed channel or error
     #[error("unable to receive event from control channel")]
     ReceivingChangeStateEvent,

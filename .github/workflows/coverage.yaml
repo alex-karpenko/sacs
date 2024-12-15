@@ -29,9 +29,7 @@ jobs:
           RUSTFLAGS: -Cinstrument-coverage
           LLVM_PROFILE_FILE: sacs-%p-%m.profraw
           RUST_LOG: debug
-        run: |
-          cargo build
-          cargo test
+        run: cargo test --all-features --all
 
       - name: Generate coverage
         run: |

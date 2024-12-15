@@ -14,8 +14,8 @@ version = "0.8.0"
 exclude = [".github/**", ".vscode/**", "TODO.md", "Cargo.lock", "target/**", ".gitignore", "mutants.*/**"]
 
 [dependencies]
-chrono = { version = "0.4.38", default-features = false, features = ["std", "clock"] }
-cron-lite = { version = "0.2.0", default-features = false }
+chrono = { version = "0.4.20", default-features = false, features = ["std", "clock"] }
+cron-lite = { version = "0.2.1", default-features = false }
 futures = { version = "0.3.30", default-features = false, features = ["alloc", "std", "async-await"] }
 thiserror = "2.0"
 tokio = { version = "1.37.0", features = ["time", "macros", "sync", "signal", "rt", "rt-multi-thread"] }

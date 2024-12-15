@@ -37,7 +37,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all all-features -- -D warnings
+        run: cargo clippy --all --all-features -- -D warnings
 
       - name: Install cargo-hack
         uses: taiki-e/install-action@v2

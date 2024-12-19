@@ -14,7 +14,7 @@
 
 ## Features
 
-- Runs tasks with different types of schedule: once, with delay, by interval, with a cron schedule.
+- Run tasks with different types of schedule: once, with delay, by interval, with a cron schedule.
 - Uses current `Tokio` runtime or creates new one with specified type, number of threads and limited parallelism.
 - Allows task cancellation, getting current state and runtime statistics of the task.
 - Task execution time may be limited.
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     // Create scheduler with default config
     let scheduler = Scheduler::default();
 
-    // Create task with cron schedule: repeat it every 3 seconds
+    // Create a task with cron schedule: repeat it every 3 seconds
     let cron = TaskSchedule::Cron("*/3 * * * * *".try_into()?, CronOpts::default());
     let task = Task::new(cron, |id| {
         Box::pin(async move {
@@ -60,11 +60,15 @@ async fn main() -> Result<()> {
     // ... and do any other async work in parallel
     tokio::time::sleep(Duration::from_secs(10)).await;
 
-    // It's not mandatory but good to shutdown scheduler
+    // It's not mandatory, but good to shut down scheduler
     // Wait for completion of all running jobs
     scheduler.shutdown(ShutdownOpts::WaitForFinish).await
 }
 ```
+
+## Feature flags
+
+- `tz` - enables cron schedules with timezone, see [`cron-lite`](https://docs.rs/cron-lite/) documentation for details.
 
 ## TODO
 
@@ -73,6 +77,7 @@ async fn main() -> Result<()> {
 convenient to create and refer tasks.
 - [x] Tracing.
 - [x] Task with limited execution time.
+- [x] Refactor `CronSchedule` to move large enum from stack to heap.
 - [ ] More examples.
 
 ## License

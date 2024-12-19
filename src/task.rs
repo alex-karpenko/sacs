@@ -5,13 +5,12 @@
 //!
 use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error};
 use chrono::{DateTime, Local};
-use cron::Schedule;
+use cron_lite::Schedule;
 use futures::Future;
 use std::{
     collections::BTreeSet,
     fmt::Display,
     pin::Pin,
-    str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -675,6 +674,11 @@ impl TaskState {
 /// Seconds and years can be omitted: if an expression has five items, it runs at second 0 every year;
 /// if it has six items - the first item defines seconds.
 ///
+/// For more information about valid cron expressions,
+/// please refer to [cron-lite](https://docs.rs/cron-lite/) crate documentation.
+///
+/// It's possible to use cron expression with timezone if `tz` feature is enabled.
+///
 /// ## Examples
 ///
 /// ```rust
@@ -687,13 +691,13 @@ impl TaskState {
 /// let every_5th_second: CronSchedule = "*/5 * * * * *".try_into().unwrap();
 /// let every_business_hour: CronSchedule = "0 9-18 * * Mon-Fri".try_into().unwrap();
 ///
-/// // Every even year every 10 seconds at 9:00-9:01am on January 1st if this is a weekend.
-/// let something_senseless: CronSchedule = "*/10 0 9 1 1 Sat,Sun */2".try_into().unwrap();
+/// // Every even year every 10 seconds at 9:00-9:01am on January 1st.
+/// let something_senseless: CronSchedule = "*/10 0 9 1 1 ? */2".try_into().unwrap();
 /// ```
 ///
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CronSchedule {
-    schedule: Schedule,
+    schedule: Box<Schedule>,
 }
 
 impl Display for CronSchedule {
@@ -704,7 +708,7 @@ impl Display for CronSchedule {
 
 impl CronSchedule {
     fn upcoming(&self) -> SystemTime {
-        let next: SystemTime = self.schedule.upcoming(Local).take(1).next().unwrap().into();
+        let next: SystemTime = self.schedule.upcoming(&Local::now()).unwrap().into();
         next
     }
 }
@@ -713,23 +717,11 @@ impl TryFrom<String> for CronSchedule {
     type Error = Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        // Sanitize it
-        let value = value
-            .split(' ')
-            .map(String::from)
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<String>>()
-            .join(" ");
-        // Add leading seconds if absent
-        let value = if value.split(' ').count() == 5 {
-            String::from("0 ") + &value
-        } else {
-            value
-        };
-
         // Try to convert into schedule
-        let schedule = Schedule::from_str(value.as_str())?;
-        Ok(Self { schedule })
+        let schedule = Schedule::new(value)?;
+        Ok(Self {
+            schedule: Box::new(schedule),
+        })
     }
 }
 
@@ -1333,12 +1325,12 @@ mod test {
         assert_eq!(task.status(), TaskStatus::New);
 
         assert_eq!(
-            CronSchedule::try_from("1 2 3 4 5").unwrap(),
-            CronSchedule::try_from(String::from("1 2 3 4 5")).unwrap()
+            CronSchedule::try_from("1 2 3 4 ?").unwrap(),
+            CronSchedule::try_from(String::from("0 1 2 3 4 ? *")).unwrap()
         );
         assert_eq!(
-            CronSchedule::try_from("1 2 3 4 5").unwrap(),
-            CronSchedule::try_from(&String::from("1 2 3 4 5")).unwrap()
+            CronSchedule::try_from("1 2 ? 4 5").unwrap(),
+            CronSchedule::try_from(&String::from("0 1 2 ? 4 5 *")).unwrap()
         );
     }
 
@@ -1374,8 +1366,8 @@ mod test {
         assert_eq!(format!("{:?}", task2), format!("Task {{ id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: Some(1s) }}"));
 
         assert_eq!(
-            format!("{}", CronSchedule::try_from("1 2 3 4 5").unwrap()),
-            String::from("0 1 2 3 4 5")
+            format!("{}", CronSchedule::try_from("1 2 3 4 ?").unwrap()),
+            String::from("0 1 2 3 4 ? *")
         );
     }
 }

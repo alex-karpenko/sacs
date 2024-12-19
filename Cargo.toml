@@ -10,20 +10,21 @@ license = "MIT"
 name = "sacs"
 readme = "README.md"
 repository = "https://github.com/alex-karpenko/sacs"
-version = "0.7.0"
+version = "0.8.0"
 exclude = [".github/**", ".vscode/**", "TODO.md", "Cargo.lock", "target/**", ".gitignore", "mutants.*/**"]
 
 [dependencies]
-chrono = { version = "0.4.38", default-features = false, features = ["std"] }
-cron = "0.13.0"
+chrono = { version = "0.4.20", default-features = false, features = ["std", "clock"] }
+cron-lite = { version = "0.2.1", default-features = false }
 futures = { version = "0.3.30", default-features = false, features = ["alloc", "std", "async-await"] }
-thiserror = "2.0.3"
+thiserror = "2.0"
 tokio = { version = "1.37.0", features = ["time", "macros", "sync", "signal", "rt", "rt-multi-thread"] }
 tracing = { version = "0.1.40", default-features = false, features = ["std", "attributes"] }
 uuid = { version = "1.8.0", features = ["fast-rng", "v4"] }
 
 [features]
 async-trait = []
+tz = ["cron-lite/tz"]
 
 [dev-dependencies]
 opentelemetry = { version = "0.27.0", features = ["trace", "logs"] }

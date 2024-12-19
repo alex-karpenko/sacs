@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
 convenient to create and refer tasks.
 - [x] Tracing.
 - [x] Task with limited execution time.
-- [ ] Refactor `TaskSchedule` to large enum from stack to heap.
+- [x] Refactor `CronSchedule` to move large enum from stack to heap.
 - [ ] More examples.
 
 ## License

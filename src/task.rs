@@ -405,7 +405,6 @@ impl Display for TaskId {
 /// ```
 ///
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)] // TODO: refactor to get rid of large enum in stack
 pub enum TaskSchedule {
     /// Starts the job immediately and runs it once (no repetitions).
     Once,
@@ -698,7 +697,7 @@ impl TaskState {
 ///
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CronSchedule {
-    schedule: Schedule,
+    schedule: Box<Schedule>,
 }
 
 impl Display for CronSchedule {
@@ -720,7 +719,9 @@ impl TryFrom<String> for CronSchedule {
     fn try_from(value: String) -> Result<Self, Self::Error> {
         // Try to convert into schedule
         let schedule = Schedule::new(value)?;
-        Ok(Self { schedule })
+        Ok(Self {
+            schedule: Box::new(schedule),
+        })
     }
 }
 

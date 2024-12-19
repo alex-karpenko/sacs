@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2024-12-19
+### Details
+#### Breaking changes
+- Use cron-lite crate instead of cron to reduce dependencies by @alex-karpenko in [#34](https://github.com/alex-karpenko/sacs/pull/34)
+
+#### Changed
+- Improve unit tests by @alex-karpenko in [#33](https://github.com/alex-karpenko/sacs/pull/33)
+
+#### Fixed
+- Get rid of deprecated tracing method in tests by @alex-karpenko in [#31](https://github.com/alex-karpenko/sacs/pull/31)
+
+## New Contributors
+* @alex-karpenko made their first contribution in [#34](https://github.com/alex-karpenko/sacs/pull/34)
+
 ## [0.7.0] - 2024-11-22
 ### Details
 #### Breaking changes
@@ -114,6 +128,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[0.8.0]: https://github.com/alex-karpenko/sacs/compare/v0.7.0..v0.8.0
 [0.7.0]: https://github.com/alex-karpenko/sacs/compare/v0.6.4..v0.7.0
 [0.6.4]: https://github.com/alex-karpenko/sacs/compare/v0.6.3..v0.6.4
 [0.6.3]: https://github.com/alex-karpenko/sacs/compare/v0.6.2..v0.6.3

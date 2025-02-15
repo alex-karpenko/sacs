@@ -9,6 +9,7 @@ on:
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+  pull_request:
 
 jobs:
   security-audit:

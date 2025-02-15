@@ -1,3 +1,4 @@
+output = "target"
 additional_cargo_args = ["--all-features"]
 cap_lints = true
 exclude_re = [

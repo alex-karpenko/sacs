@@ -1,12 +1,11 @@
 name: Code coverage report
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches:
       - main
       - rel-v*
-  schedule:
-    - cron: "0 8 * * 5"
 
 env:
   CARGO_TERM_COLOR: always

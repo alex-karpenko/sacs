@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2025-03-29
+### Details
+#### Changed
+- Update opentelemetry stack to the latest v0.28 (dev dependencies only) by @alex-karpenko in [#36](https://github.com/alex-karpenko/sacs/pull/36)
+- Update dev dependencies by @alex-karpenko in [#38](https://github.com/alex-karpenko/sacs/pull/38)
+
+#### Fixed
+- Increase MSRV to 1.81 by @alex-karpenko in [#37](https://github.com/alex-karpenko/sacs/pull/37)
+
 ## [0.8.0] - 2024-12-19
 ### Details
 #### Breaking changes
@@ -12,9 +21,6 @@ All notable changes to this project will be documented in this file.
 
 #### Fixed
 - Get rid of deprecated tracing method in tests by @alex-karpenko in [#31](https://github.com/alex-karpenko/sacs/pull/31)
-
-## New Contributors
-* @alex-karpenko made their first contribution in [#34](https://github.com/alex-karpenko/sacs/pull/34)
 
 ## [0.7.0] - 2024-11-22
 ### Details
@@ -128,6 +134,7 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+[0.8.1]: https://github.com/alex-karpenko/sacs/compare/v0.8.0..v0.8.1
 [0.8.0]: https://github.com/alex-karpenko/sacs/compare/v0.7.0..v0.8.0
 [0.7.0]: https://github.com/alex-karpenko/sacs/compare/v0.6.4..v0.7.0
 [0.6.4]: https://github.com/alex-karpenko/sacs/compare/v0.6.3..v0.6.4

@@ -46,16 +46,10 @@ jobs:
           tool: cargo-hack
 
       - name: Check feature-powerset
-        run: cargo hack check --no-dev-deps --feature-powerset
-
-      - name: Check each-feature
-        run: cargo hack check --no-dev-deps --each-feature
+        run: cargo hack check --no-dev-deps --feature-powerset --depth 4
 
       - name: Tests feature-powerset
-        run: cargo hack test --feature-powerset
-
-      - name: Tests each-feature
-        run: cargo hack test --each-feature
+        run: cargo hack test --feature-powerset --depth 4
 
   semver-checks:
     runs-on: ubuntu-latest

@@ -184,7 +184,7 @@ mod test {
             Some(Duration::from_secs(1)),
         );
 
-        assert_eq!(format!("{:?}", job1), format!("Job {{ id: JobId {{ task_id: TaskId {{ id: \"TEST\" }}, id: {} }}, timeout: None }}",job1.id().id));
-        assert_eq!(format!("{:?}", job2), format!("Job {{ id: JobId {{ task_id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, id: {} }}, timeout: Some(1s) }}", job2.id().id));
+        assert_eq!(format!("{job1:?}"), format!("Job {{ id: JobId {{ task_id: TaskId {{ id: \"TEST\" }}, id: {} }}, timeout: None }}",job1.id().id));
+        assert_eq!(format!("{job2:?}"), format!("Job {{ id: JobId {{ task_id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, id: {} }}, timeout: Some(1s) }}", job2.id().id));
     }
 }

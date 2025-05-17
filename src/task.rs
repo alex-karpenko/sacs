@@ -1362,8 +1362,8 @@ mod test {
             .with_id("TEST_WITH_TIMEOUT")
             .with_timeout(Duration::from_secs(1));
 
-        assert_eq!(format!("{:?}", task1), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: None }}"));
-        assert_eq!(format!("{:?}", task2), format!("Task {{ id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: Some(1s) }}"));
+        assert_eq!(format!("{task1:?}"), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: None }}"));
+        assert_eq!(format!("{task2:?}"), format!("Task {{ id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: Some(1s) }}"));
 
         assert_eq!(
             format!("{}", CronSchedule::try_from("1 2 3 4 ?").unwrap()),

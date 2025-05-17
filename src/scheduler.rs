@@ -720,9 +720,9 @@ mod test {
                 let jobs = jobs.clone();
                 Box::pin(async move {
                     jobs.write().await.push(id.clone());
-                    log.write().await.push(format!("{},start,{id}", s));
+                    log.write().await.push(format!("{s},start,{id}"));
                     tokio::time::sleep(task_duration).await;
-                    log.write().await.push(format!("{},finish,{id}", s));
+                    log.write().await.push(format!("{s},finish,{id}"));
                 })
             });
             scheduler.add(task).await?;
@@ -917,8 +917,7 @@ mod test {
             format!("1,finish,{}", jobs[4]), // 8500
         ]);
         let debug = format!(
-            "jobs={:?}\nlogs={:?}\nexpected1={:?}\nexpected2={:?}",
-            jobs, logs, expected1, expected2
+            "jobs={jobs:?}\nlogs={logs:?}\nexpected1={expected1:?}\nexpected2={expected2:?}"
         );
         assert!((logs == expected1) || (logs == expected2), "{debug}");
     }
@@ -960,7 +959,7 @@ mod test {
             format!("0,start,{}", jobs[1]),
             format!("0,finish,{}", jobs[1]),
         ]);
-        let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
+        let debug = format!("jobs={jobs:?}\nlogs={logs:?}\nexpected={expected:?}");
         assert_eq!(logs, expected, "{debug}");
     }
 
@@ -1001,7 +1000,7 @@ mod test {
             format!("0,start,{}", jobs[0]),
             format!("0,finish,{}", jobs[0]),
         ]);
-        let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
+        let debug = format!("jobs={jobs:?}\nlogs={logs:?}\nexpected={expected:?}");
         assert_eq!(logs, expected, "{debug}");
     }
 
@@ -1051,7 +1050,7 @@ mod test {
             format!("0,finish,{}", jobs[1]),
             format!("0,finish,{}", jobs[2]),
         ]);
-        let debug = format!("jobs={:?}\nlogs={:?}\nexpected={:?}", jobs, logs, expected);
+        let debug = format!("jobs={jobs:?}\nlogs={logs:?}\nexpected={expected:?}");
         assert_eq!(logs, expected, "{debug}");
     }
 

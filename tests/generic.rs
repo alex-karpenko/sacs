@@ -90,9 +90,9 @@ async fn basic_test_suite(
             let jobs = jobs.clone();
             Box::pin(async move {
                 jobs.write().await.push(id.clone());
-                log.write().await.push(format!("{},start,{id}", s));
+                log.write().await.push(format!("{s},start,{id}"));
                 tokio::time::sleep(task_duration).await;
-                log.write().await.push(format!("{},finish,{id}", s));
+                log.write().await.push(format!("{s},finish,{id}"));
             })
         });
         scheduler.add(task).await?;

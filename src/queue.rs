@@ -128,13 +128,13 @@ impl Queue {
         } else if (ids.is_none() && times.is_some()) || (ids.is_some() && times.is_none()) {
             // There is some inconsistency in indexes - looks like a BUG
             debug!(?event, "inconsistent indexes discovered");
-            return Err(Error::InconsistentQueueContent);
+            Err(Error::InconsistentQueueContent)
         } else {
             // Event is absent in both indexes:
             // it's strange (we try to delete non-existent event), but this is not an error of the queue,
             // it's rather an error at the calling side.
             debug!(?event, "event not found");
-            return Ok(());
+            Ok(())
         }
     }
 }

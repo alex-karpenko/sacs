@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2025-10-31
+### Details
+#### Breaking changes
+- Increase MSRV to 1.83 by @alex-karpenko in [#44](https://github.com/alex-karpenko/sacs/pull/44)
+
+#### Changed
+- Update dev dependencies by @alex-karpenko in [#43](https://github.com/alex-karpenko/sacs/pull/43)
+
+#### Fixed
+- Fix lint warnings by @alex-karpenko in [#42](https://github.com/alex-karpenko/sacs/pull/42)
+- Update github workflows by @alex-karpenko in [#45](https://github.com/alex-karpenko/sacs/pull/45)
+
 ## [0.8.2] - 2025-05-17
 ### Details
 #### Changed
@@ -143,6 +155,12 @@ All notable changes to this project will be documented in this file.
 - Update crate config by @alex-karpenko
 - Rename scheduler drop method to avoid conflicts by @alex-karpenko in [#2](https://github.com/alex-karpenko/sacs/pull/2)
 
+## [0.0.0] - 2024-02-18
+### Details
+## New Contributors
+* @alex-karpenko made their first contribution
+
+[0.9.0]: https://github.com/alex-karpenko/sacs/compare/v0.8.2..v0.9.0
 [0.8.2]: https://github.com/alex-karpenko/sacs/compare/v0.8.1..v0.8.2
 [0.8.1]: https://github.com/alex-karpenko/sacs/compare/v0.8.0..v0.8.1
 [0.8.0]: https://github.com/alex-karpenko/sacs/compare/v0.7.0..v0.8.0

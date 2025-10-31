@@ -3,14 +3,14 @@ authors = ["Oleksii Karpenko <alexkarpenko@yahoo.com>"]
 categories = ["asynchronous"]
 description = "Simple Async Cron Scheduler for Tokio"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.83"
 homepage = "https://github.com/alex-karpenko/sacs"
 keywords = ["cron", "async", "job", "scheduler", "tokio"]
 license = "MIT"
 name = "sacs"
 readme = "README.md"
 repository = "https://github.com/alex-karpenko/sacs"
-version = "0.8.2"
+version = "0.9.0"
 exclude = [".github/**", ".vscode/**", "TODO.md", "Cargo.lock", "target/**", ".gitignore", "mutants.*/**"]
 
 [dependencies]

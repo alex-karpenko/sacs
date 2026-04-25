@@ -20,7 +20,7 @@ const QUEUE_CONTROL_CHANNEL_SIZE: usize = 1024;
 const EMPTY_QUEUE_SLEEP_DURATION_SECONDS: u64 = 3600;
 
 /// Events queue behavior
-pub trait EventTimeQueue: Debug {
+pub(crate) trait EventTimeQueue: Debug {
     /// Blocks execution until next event time.
     /// Returns Result with event and remove it from queue.
     async fn next(&self) -> Result<Event>;

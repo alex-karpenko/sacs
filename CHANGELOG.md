@@ -2,10 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.3] - 2026-04-25
+### Details
+#### Fixed
+- Fix private type exposition error by @alex-karpenko in [#48](https://github.com/alex-karpenko/sacs/pull/48)
+
 ## [0.9.2] - 2026-03-13
 ### Details
 #### Breaking changes
-- Increase MSRV to v1.86
+- Increase MSRV to v1.86 by @alex-karpenko in [#47](https://github.com/alex-karpenko/sacs/pull/47)
 
 #### Fixed
 
@@ -174,6 +179,7 @@ All notable changes to this project will be documented in this file.
 ## New Contributors
 * @alex-karpenko made their first contribution
 
+[0.9.3]: https://github.com/alex-karpenko/sacs/compare/v0.9.2..v0.9.3
 [0.9.2]: https://github.com/alex-karpenko/sacs/compare/v0.9.1..v0.9.2
 [0.9.1]: https://github.com/alex-karpenko/sacs/compare/v0.9.0..v0.9.1
 [0.9.0]: https://github.com/alex-karpenko/sacs/compare/v0.8.2..v0.9.0

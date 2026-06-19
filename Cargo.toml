@@ -11,15 +11,40 @@ name = "sacs"
 readme = "README.md"
 repository = "https://github.com/alex-karpenko/sacs"
 version = "0.9.3"
-exclude = [".github/**", ".vscode/**", "TODO.md", "Cargo.lock", "target/**", ".gitignore", "mutants.*/**"]
+exclude = [
+    ".github/**",
+    ".vscode/**",
+    "TODO.md",
+    "Cargo.lock",
+    "target/**",
+    ".gitignore",
+    "mutants.*/**",
+]
 
 [dependencies]
-chrono = { version = "0.4.20", default-features = false, features = ["std", "clock"] }
+chrono = { version = "0.4.20", default-features = false, features = [
+    "std",
+    "clock",
+] }
 cron-lite = { version = "0.3.1", default-features = false }
-futures = { version = "0.3.30", default-features = false, features = ["alloc", "std", "async-await"] }
+futures = { version = "0.3.30", default-features = false, features = [
+    "alloc",
+    "std",
+    "async-await",
+] }
 thiserror = "2.0"
-tokio = { version = "1.38.2", features = ["time", "macros", "sync", "signal", "rt", "rt-multi-thread"] }
-tracing = { version = "0.1.40", default-features = false, features = ["std", "attributes"] }
+tokio = { version = "1.38.2", features = [
+    "time",
+    "macros",
+    "sync",
+    "signal",
+    "rt",
+    "rt-multi-thread",
+] }
+tracing = { version = "0.1.40", default-features = false, features = [
+    "std",
+    "attributes",
+] }
 uuid = { version = "1.8.0", features = ["fast-rng", "v4"] }
 
 [features]
@@ -27,10 +52,15 @@ async-trait = []
 tz = ["cron-lite/tz"]
 
 [dev-dependencies]
-opentelemetry = { version = "0.31.0", features = ["trace", "logs"] }
-opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "tokio"] }
-opentelemetry-otlp = { version = "0.31.0", features = ["tokio", "trace", "tonic", "grpc-tonic"] }
-tracing-opentelemetry = "0.32.1"
+opentelemetry = { version = "0.32.0", features = ["trace", "logs"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio", "tokio"] }
+opentelemetry-otlp = { version = "0.32.0", features = [
+    "tokio",
+    "trace",
+    "tonic",
+    "grpc-tonic",
+] }
+tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 tonic = { version = "0.14.5" }
 ntest = "0.9.3"

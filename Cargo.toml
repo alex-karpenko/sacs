@@ -52,15 +52,15 @@ async-trait = []
 tz = ["cron-lite/tz"]
 
 [dev-dependencies]
-opentelemetry = { version = "0.31.0", features = ["trace", "logs"] }
-opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "tokio"] }
-opentelemetry-otlp = { version = "0.31.0", features = [
+opentelemetry = { version = "0.32.0", features = ["trace", "logs"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio", "tokio"] }
+opentelemetry-otlp = { version = "0.32.0", features = [
     "tokio",
     "trace",
     "tonic",
     "grpc-tonic",
 ] }
-tracing-opentelemetry = "0.32.1"
+tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 tonic = { version = "0.14.5" }
 ntest = "0.9.3"

@@ -1,6 +1,8 @@
 name: Continuous integration
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "0 9 * * 5"
@@ -11,9 +13,12 @@ permissions:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
         rust:
           - stable
           - beta
@@ -51,6 +56,20 @@ jobs:
 
       - name: Tests feature-powerset
         run: cargo hack test --feature-powerset --depth 4
+
+  # Guards against silent `usize` counter wraps in release builds (where `debug_assert!`
+  # compiles out): runs the full suite with `overflow-checks` force-enabled on a release
+  # profile, so any future state-machine defect fails loudly instead of corrupting state.
+  overflow-checks:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-C overflow-checks=yes"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        name: Setup toolchain
+      - name: Test (release, overflow-checks)
+        run: cargo test --release --all-features
 
   semver-checks:
     runs-on: ubuntu-latest

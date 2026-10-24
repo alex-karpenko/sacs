@@ -2,12 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.5] - 2026-10-24
+### Details
+#### Fixed
+- Increase MSRV to v1.89, update dev dependencies by @alex-karpenko in [#52](https://github.com/alex-karpenko/sacs/pull/52)
+
 ## [0.9.4] - 2026-06-19
 ### Details
 #### Fixed
-- Increase MSRV to v1.88
-- Update tracig/opentelemetry dev dependencies to the latest versions
-- Update github workflows to use the latest action verisons
+- Increase MSRV to v1.88 by @alex-karpenko in [#49](https://github.com/alex-karpenko/sacs/pull/49)
+- Update tracig/opentelemetry dev dependencies to the latest versions by @alex-karpenko in [#50](https://github.com/alex-karpenko/sacs/pull/50)
+- Update github workflows to use the latest action verisons by @alex-karpenko in [#51](https://github.com/alex-karpenko/sacs/pull/51)
 
 ## [0.9.3] - 2026-04-25
 ### Details
@@ -186,6 +191,7 @@ All notable changes to this project will be documented in this file.
 ## New Contributors
 * @alex-karpenko made their first contribution
 
+[0.9.5]: https://github.com/alex-karpenko/sacs/compare/v0.9.4..v0.9.5
 [0.9.4]: https://github.com/alex-karpenko/sacs/compare/v0.9.3..v0.9.4
 [0.9.3]: https://github.com/alex-karpenko/sacs/compare/v0.9.2..v0.9.3
 [0.9.2]: https://github.com/alex-karpenko/sacs/compare/v0.9.1..v0.9.2

@@ -25,7 +25,7 @@ jobs:
           - 1.89
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         name: Setup toolchain
         with:
@@ -65,7 +65,7 @@ jobs:
     env:
       RUSTFLAGS: "-C overflow-checks=yes"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         name: Setup toolchain
       - name: Test (release, overflow-checks)
@@ -76,6 +76,6 @@ jobs:
     needs: ci
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Check semver
         uses: obi1kenobi/cargo-semver-checks-action@v2

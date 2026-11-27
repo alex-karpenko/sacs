@@ -826,6 +826,14 @@ impl TryFrom<String> for CronSchedule {
     }
 }
 
+impl std::str::FromStr for CronSchedule {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::try_from(value.to_string())
+    }
+}
+
 impl TryFrom<&str> for CronSchedule {
     type Error = Error;
 
@@ -857,6 +865,8 @@ mod test {
     fn cron_with_seconds() {
         let cron: Result<CronSchedule> = " *    * * * * *".try_into();
         assert!(cron.is_ok());
+        assert!(" *    * * * * *".parse::<CronSchedule>().is_ok());
+        assert!("not a cron".parse::<CronSchedule>().is_err());
 
         let cron: Result<CronSchedule> = " 5  * * * * * ".try_into();
         assert!(cron.is_ok());

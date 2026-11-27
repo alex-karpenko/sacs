@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-11-27
+### Details
+#### Breaking changes
+- Eliminate scheduler panics, races, and resource leaks by @alex-karpenko in [#53](https://github.com/alex-karpenko/sacs/pull/53)
+- Migrate to cron-lite 0.5.0, replace chrono with jiff, remove `tz` feature by @alex-karpenko in [#54](https://github.com/alex-karpenko/sacs/pull/54)
+
+#### Fixed
+
 ## [0.9.5] - 2026-10-24
 ### Details
 #### Fixed
@@ -191,6 +199,7 @@ All notable changes to this project will be documented in this file.
 ## New Contributors
 * @alex-karpenko made their first contribution
 
+[0.10.0]: https://github.com/alex-karpenko/sacs/compare/v0.9.5..v0.10.0
 [0.9.5]: https://github.com/alex-karpenko/sacs/compare/v0.9.4..v0.9.5
 [0.9.4]: https://github.com/alex-karpenko/sacs/compare/v0.9.3..v0.9.4
 [0.9.3]: https://github.com/alex-karpenko/sacs/compare/v0.9.2..v0.9.3

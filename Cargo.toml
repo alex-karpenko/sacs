@@ -13,9 +13,9 @@ version = "0.10.0"
 exclude = [".github/**", ".vscode/**", "TODO.md", "Cargo.lock", "target/**", ".gitignore", "mutants.*/**"]
 
 [dependencies]
-chrono = { version = "0.4.20", default-features = false, features = ["std", "clock"] }
-cron-lite = { version = "0.4.0", default-features = false }
+cron-lite = { version = "0.5.0", default-features = false }
 futures = { version = "0.3.30", default-features = false, features = ["alloc", "std", "async-await"] }
+jiff = "1.0.2"
 thiserror = "2.0"
 tokio = { version = "1.38.2", features = ["time", "macros", "sync", "signal", "rt", "rt-multi-thread"] }
 tracing = { version = "0.1.40", default-features = false, features = ["std", "attributes"] }
@@ -23,7 +23,6 @@ uuid = { version = "1.8.0", features = ["fast-rng", "v4"] }
 
 [features]
 async-trait = []
-tz = ["cron-lite/tz"]
 
 [dev-dependencies]
 opentelemetry = { version = "0.33.1", features = ["trace", "logs"] }

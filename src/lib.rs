@@ -57,8 +57,19 @@
 //! }
 //! ```
 //!
+//! # Cron schedules with timezone
+//! A cron expression without a timezone is evaluated in the system's local timezone. To pin a schedule to a specific
+//! timezone, prefix the expression with `TZ=`, for example `TZ=Europe/Kyiv 0 12 * * *` or `TZ=UTC @daily`,
+//! see [`CronSchedule`](task::CronSchedule) and [`cron-lite`](https://docs.rs/cron-lite/) documentation for details.
+//!
+//! Timezone names are resolved at runtime from the operating system's timezone database (on Unix,
+//! `/usr/share/zoneinfo` or the directory set in the `TZDIR` environment variable). Make sure `tzdata` is installed
+//! wherever your application runs: minimal container images (distroless, scratch, Alpine without the `tzdata` package)
+//! don't have it, and any `TZ=` schedule fails to parse there with [`Error::InvalidCronExpression`].
+//!
 //! # Feature flags
-//! - `tz` - enables cron schedules with timezone, see [`cron-lite`](https://docs.rs/cron-lite/) documentation for details.
+//! - `async-trait` - declares [`TaskScheduler`](scheduler::TaskScheduler) methods as `async fn` instead of
+//!   functions returning `impl Future + Send`.
 
 mod event;
 mod executor;
@@ -70,6 +81,7 @@ mod worker;
 
 use job::JobId;
 use std::fmt::Debug;
+use std::time::SystemTime;
 use std::{future::Future, pin::Pin, sync::Arc};
 use task::TaskId;
 use thiserror::Error;
@@ -177,6 +189,23 @@ impl<T: Debug> Default for ControlChannel<T> {
     }
 }
 
+/// Format used to render timestamps in `Debug` output, e.g. `2026-11-27 10:15:00.123 +02:00`.
+const DEBUG_TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.f %:z";
+
+/// Renders `time` in the system's local timezone for `Debug` output.
+///
+/// Falls back to the `SystemTime`'s own `Debug` representation if `time` is outside the range
+/// supported by `jiff`.
+pub(crate) fn format_local_time(time: SystemTime) -> String {
+    match jiff::Timestamp::try_from(time) {
+        Ok(ts) => ts
+            .to_zoned_datetime(jiff::tz::TimeZone::system())
+            .strftime(DEBUG_TIME_FORMAT)
+            .to_string(),
+        Err(_) => format!("{time:?}"),
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -185,5 +214,27 @@ mod test {
     fn constructors() {
         let cc = ControlChannel::<bool>::default();
         assert_eq!(cc.sender.capacity(), DEFAULT_CONTROL_CHANNEL_SIZE);
+    }
+
+    #[test]
+    fn format_local_time_round_trips() {
+        let time = SystemTime::UNIX_EPOCH + std::time::Duration::new(1_764_236_100, 123_000_000);
+        let formatted = format_local_time(time);
+
+        let parsed = jiff::fmt::strtime::parse(DEBUG_TIME_FORMAT, &formatted)
+            .and_then(|tm| tm.to_timestamp())
+            .unwrap();
+        assert_eq!(SystemTime::try_from(parsed).unwrap(), time);
+    }
+
+    #[test]
+    fn format_local_time_out_of_range_falls_back_to_debug() {
+        // ~35k years after the epoch: representable by `SystemTime`, but beyond `jiff`'s range.
+        let Some(time) =
+            SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(1 << 40))
+        else {
+            return;
+        };
+        assert_eq!(format_local_time(time), format!("{time:?}"));
     }
 }

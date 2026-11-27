@@ -1,5 +1,4 @@
-use crate::task::TaskId;
-use chrono::{DateTime, Local};
+use crate::{format_local_time, task::TaskId};
 use std::fmt::Debug;
 use std::time::SystemTime;
 use uuid::Uuid;
@@ -73,7 +72,7 @@ pub(crate) struct Event {
 
 impl Debug for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let time_str = format!("{}", DateTime::<Local>::from(self.time));
+        let time_str = format_local_time(self.time);
         f.debug_struct("Event")
             .field("id", &self.id)
             .field("time", &time_str)
@@ -222,7 +221,7 @@ mod test {
             format!("{:?}", Event::new(id, now)),
             format!(
                 "Event {{ id: EventId {{ id: \"TEST\" }}, time: \"{}\" }}",
-                DateTime::<Local>::from(now)
+                format_local_time(now)
             )
         );
     }

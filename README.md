@@ -70,15 +70,22 @@ async fn main() -> Result<()> {
 
 - `tz` - enables cron schedules with timezone, see [`cron-lite`](https://docs.rs/cron-lite/) documentation for details.
 
-## TODO
+## Breaking changes & migration
 
-- [x] Make [`TaskId`](https://docs.rs/sacs/latest/sacs/task/struct.TaskId.html) and
-[`JobId`](https://docs.rs/sacs/latest/sacs/job/struct.JobId.html) more flexible and
-convenient to create and refer tasks.
-- [x] Tracing.
-- [x] Task with limited execution time.
-- [x] Refactor `CronSchedule` to move large enum from stack to heap.
-- [ ] More examples.
+`0.10.0` introduces a few breaking changes. The highlights:
+
+- [`Error`](https://docs.rs/sacs/latest/sacs/enum.Error.html) is now `#[non_exhaustive]` --
+  an exhaustive `match` on it needs a wildcard arm.
+- The `cron-lite` dependency was updated to `0.4.0`; its `CronError` variants changed shape
+  (tuple to struct fields) and it is also `#[non_exhaustive]` now. Update any code that
+  destructures `Error::InvalidCronExpression(cron_lite::error::CronError::...)`.
+- [`TaskScheduler::cancel`](https://docs.rs/sacs/latest/sacs/scheduler/trait.TaskScheduler.html#tymethod.cancel)
+  now returns `Err(Error::IncorrectTaskId)` for an unknown or already-finished task id, matching
+  its documented contract, instead of always returning `Ok(())`.
+- A few new `Error` variants (`NoUpcomingEvent`, `ScheduleOverflow`, `InvalidWorkerConfig`,
+  `SchedulerTerminated`) are now returned from `add()`/`cancel()`/`status()`/`statistics()` in
+  cases that previously panicked or produced a misleading error.
+
 
 ## License
 

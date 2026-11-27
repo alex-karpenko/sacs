@@ -12,15 +12,17 @@ use crate::{
 };
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::{Duration, SystemTime},
 };
 use tokio::{
     select,
-    sync::{mpsc::Sender, RwLock},
-    task::yield_now,
+    sync::{mpsc::Sender, oneshot, RwLock},
 };
-use tracing::{debug, instrument, warn};
+use tracing::{debug, error, instrument, warn};
 
 /// Default maximin number of jobs to run on the single worker
 pub(crate) const DEFAULT_MAX_PARALLEL_JOBS: usize = 16;
@@ -159,13 +161,32 @@ pub struct Scheduler {
     tasks: Arc<RwLock<HashMap<TaskId, Task>>>,
     channel: Sender<ChangeStateEvent>,
     handler: tokio::task::JoinHandle<Result<()>>,
+    // Only read back via `jobs_index_size()`, which is `#[cfg(test)]`-only.
+    #[allow(dead_code)]
+    jobs_index_size: Arc<AtomicUsize>,
 }
 
-#[derive(Debug, Clone)]
 enum ChangeStateEvent {
     Shutdown(ShutdownOpts),
-    EnqueueTask(Task),
-    DropTask(TaskId, CancelOpts),
+    EnqueueTask(Task, SystemTime, oneshot::Sender<Result<TaskId>>),
+    DropTask(TaskId, CancelOpts, oneshot::Sender<Result<()>>),
+}
+
+// `oneshot::Sender` isn't `Debug`, so this is implemented manually to keep tracing usable.
+impl std::fmt::Debug for ChangeStateEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChangeStateEvent::Shutdown(opts) => f.debug_tuple("Shutdown").field(opts).finish(),
+            ChangeStateEvent::EnqueueTask(task, at, _) => f
+                .debug_tuple("EnqueueTask")
+                .field(&task.id())
+                .field(at)
+                .finish(),
+            ChangeStateEvent::DropTask(id, opts, _) => {
+                f.debug_tuple("DropTask").field(id).field(opts).finish()
+            }
+        }
+    }
 }
 
 /// Type of `Tokio` runtime to use for jobs worker.
@@ -225,7 +246,14 @@ pub enum CancelOpts {
 /// Define how to shut down [`Scheduler`] with running tasks.
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShutdownOpts {
-    /// Lets running tasks continue working.
+    /// Lets running tasks continue working without blocking the caller of
+    /// [`shutdown`](TaskScheduler::shutdown).
+    ///
+    /// # Note
+    /// The worker thread backing running jobs is detached, not joined, so jobs are still
+    /// lost if the whole process exits before they finish. If your process may exit shortly
+    /// after shutdown, use [`ShutdownOpts::WaitForFinish`] or [`ShutdownOpts::WaitFor`]
+    /// instead.
     IgnoreRunning,
     /// Cancel tasks with respect to [`CancelOpts`].
     CancelTasks(CancelOpts),
@@ -260,7 +288,7 @@ impl GarbageCollector {
         Self::Disabled
     }
 
-    /// Helper constructor to crete immediate garbage collector.
+    /// Helper constructor to create immediate garbage collector.
     pub fn immediate() -> Self {
         Self::Immediate
     }
@@ -278,18 +306,27 @@ impl GarbageCollector {
     #[instrument("collect garbage", skip_all, level = "debug")]
     async fn collect_garbage(tasks: Arc<RwLock<HashMap<TaskId, Task>>>, expire_after: Duration) {
         let mut tasks = tasks.write().await;
-        let expired_at = SystemTime::now().checked_sub(expire_after).unwrap();
+        // An `expire_after` that reaches before the representable `SystemTime` range (an
+        // absurdly large TTL, freely constructible via the public builder) means "nothing
+        // can be expired yet" rather than a panic.
+        let expired_at = SystemTime::now()
+            .checked_sub(expire_after)
+            .unwrap_or(SystemTime::UNIX_EPOCH);
 
         let to_remove: Vec<TaskId> = tasks
             .iter()
             .filter(|(_id, task)| task.state.is_task_finished())
-            .filter(|(_id, task)| {
-                task.state
-                    .last_finished_at()
-                    .expect("finished task has no `finished_at` time set, looks like a BUG")
-                    <= expired_at
+            .filter_map(|(id, task)| match task.state.last_finished_at() {
+                Some(last_finished_at) if last_finished_at <= expired_at => Some(id.clone()),
+                Some(_) => None,
+                None => {
+                    // Every terminal `TaskState` transition sets `last_finished_at`, so this
+                    // should be unreachable; treat it as a recoverable state-machine defect
+                    // (skip the task, keep the collector running) rather than a panic.
+                    warn!(task_id = %id, "finished task has no `last_finished_at` set, skipping");
+                    None
+                }
             })
-            .map(|(id, _task)| id.clone())
             .collect();
 
         to_remove.iter().for_each(|id| {
@@ -372,18 +409,47 @@ impl SchedulerBuilder {
     }
 
     /// Build [`Scheduler`] instance.
+    ///
+    /// # Panics
+    /// Panics if the requested [`WorkerType`] is invalid (e.g. zero worker threads) or if the
+    /// underlying `Tokio` runtime can't be constructed. Use [`SchedulerBuilder::try_build`]
+    /// for a fallible alternative.
     pub fn build(self) -> Scheduler {
         Scheduler::new(self.worker_type, self.parallelism, self.garbage_collector)
+    }
+
+    /// Fallible counterpart of [`SchedulerBuilder::build`]. Returns
+    /// [`Error::InvalidWorkerConfig`] instead of panicking when the requested worker
+    /// configuration is invalid or the underlying `Tokio` runtime can't be constructed.
+    pub fn try_build(self) -> Result<Scheduler> {
+        Scheduler::try_new(self.worker_type, self.parallelism, self.garbage_collector)
     }
 }
 
 impl Scheduler {
     /// Basic [`Scheduler`] constructor. Using of [`SchedulerBuilder`] is another way to construct it with custom parameters.
+    ///
+    /// # Panics
+    /// Panics if the requested [`WorkerType`] is invalid (e.g. zero worker threads) or if the
+    /// underlying `Tokio` runtime can't be constructed (e.g. due to OS resource limits). Use
+    /// [`Scheduler::try_new`] for a fallible alternative.
     pub fn new(
         worker_type: WorkerType,
         parallelism: WorkerParallelism,
         garbage_collector: GarbageCollector,
     ) -> Self {
+        Self::try_new(worker_type, parallelism, garbage_collector)
+            .expect("invalid worker configuration or unable to construct Tokio runtime")
+    }
+
+    /// Fallible counterpart of [`Scheduler::new`]. Returns [`Error::InvalidWorkerConfig`]
+    /// instead of panicking when the requested worker configuration is invalid or the
+    /// underlying `Tokio` runtime can't be constructed.
+    pub fn try_new(
+        worker_type: WorkerType,
+        parallelism: WorkerParallelism,
+        garbage_collector: GarbageCollector,
+    ) -> Result<Self> {
         debug!(
             ?worker_type,
             ?parallelism,
@@ -391,32 +457,50 @@ impl Scheduler {
             "construct new scheduler"
         );
 
+        let executor = Executor::try_new(worker_type, parallelism)?;
         let channel = ControlChannel::<ChangeStateEvent>::new(SCHEDULER_CONTROL_CHANNEL_SIZE);
         let tasks = Arc::new(RwLock::new(HashMap::new()));
+        let jobs_index_size = Arc::new(AtomicUsize::new(0));
 
-        Self {
+        Ok(Self {
             tasks: tasks.clone(),
             channel: channel.sender(),
+            jobs_index_size: jobs_index_size.clone(),
             handler: tokio::task::spawn(Scheduler::work(
-                worker_type,
-                parallelism,
+                executor,
                 tasks.clone(),
                 channel,
                 garbage_collector,
+                jobs_index_size,
             )),
-        }
+        })
+    }
+
+    /// Returns `true` if the scheduler's background loop is still running.
+    ///
+    /// A `false` result means the loop has terminated (normally, from a panic, or from an
+    /// unrecoverable internal error) and every subsequent [`add`](TaskScheduler::add),
+    /// [`cancel`](TaskScheduler::cancel), [`status`](TaskScheduler::status) and
+    /// [`statistics`](TaskScheduler::statistics) call will fail with
+    /// [`Error::SchedulerTerminated`] instead of silently serving stale state.
+    pub fn is_alive(&self) -> bool {
+        !self.handler.is_finished()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn jobs_index_size(&self) -> usize {
+        self.jobs_index_size.load(Ordering::Relaxed)
     }
 
     #[instrument("scheduler loop", skip_all, level = "debug")]
     async fn work(
-        worker_type: WorkerType,
-        parallelism: WorkerParallelism,
+        executor: Executor,
         tasks: Arc<RwLock<HashMap<TaskId, Task>>>,
         channel: ControlChannel<ChangeStateEvent>,
         garbage_collector: GarbageCollector,
+        jobs_index_size: Arc<AtomicUsize>,
     ) -> Result<()> {
         let queue = Queue::default();
-        let executor = Executor::new(worker_type, parallelism);
         let mut jobs: HashMap<JobId, TaskId> = HashMap::new();
 
         match garbage_collector {
@@ -427,30 +511,51 @@ impl Scheduler {
                 interval,
             } => {
                 // Prepare GC task
-                let tasks = tasks.clone();
-                let task = Task::new(
+                let gc_tasks = tasks.clone();
+                let mut task = Task::new(
                     crate::task::TaskSchedule::IntervalDelayed(interval, interval),
                     move |id| {
-                        let tasks = tasks.clone();
+                        let gc_tasks = gc_tasks.clone();
                         Box::pin(async move {
                             debug!(job_id = %id, "collecting garbage");
-                            GarbageCollector::collect_garbage(tasks, expire_after).await;
+                            GarbageCollector::collect_garbage(gc_tasks, expire_after).await;
                         })
                     },
                 );
-                // Enqueue GC task, it will be processed in the first run of events loop
-                debug!(task = ?task, "schedule GC task");
-                channel
-                    .send(ChangeStateEvent::EnqueueTask(task))
-                    .await
-                    .map_err(|_e| Error::SendingChangeStateEvent)?;
+                // Install the GC task directly into the queue/tasks map instead of going
+                // through the usual oneshot-based admission (as `add()` does): the control
+                // loop below hasn't started yet, so nothing would be there to reply to the
+                // oneshot, and awaiting one here would just hang forever.
+                match task.schedule.initial_run_time() {
+                    Ok(at) => {
+                        debug!(task_id = %task.id(), "schedule GC task");
+                        let event_id = task.id.clone();
+                        let task_id = task.id.clone();
+                        queue.insert(Event::new(event_id, at)).await?;
+                        task.state.task_enqueued();
+                        tasks.write().await.insert(task_id, task);
+                    }
+                    Err(e) => {
+                        error!(
+                            error = %e,
+                            ?interval,
+                            "garbage collector schedule is invalid, garbage collector is disabled"
+                        );
+                    }
+                }
             }
         }
 
         loop {
             debug!("scheduler loop iteration");
+            // Deliberately not `biased`: a sustained burst on any one of these three
+            // sources (e.g. many concurrent `add()` calls, or many ready queue events)
+            // must not be able to starve the other two forever. Fair (pseudo-random)
+            // selection guarantees every ready branch eventually gets polled, which matters
+            // here because processing one branch can itself depend on the other two making
+            // progress (e.g. dispatching a job depends on the executor eventually reporting
+            // capacity back).
             select! {
-                biased;
                 event = channel.receive() => {
                     if let Some(event) = event {
                         debug!(event = ?event, "control event received");
@@ -461,30 +566,75 @@ impl Scheduler {
                                 tasks.write().await.clear();
                                 return Ok(())
                             },
-                            ChangeStateEvent::EnqueueTask(mut task) => {
-                                let event_id = task.id.clone();
+                            ChangeStateEvent::EnqueueTask(mut task, at, reply) => {
+                                // Atomic admission: the duplicate-id check and the insert
+                                // happen under a single `tasks` write lock, processed solely
+                                // by this loop, so two concurrent `add()` calls with the same
+                                // explicit `TaskId` can no longer both observe an absent
+                                // entry and both succeed.
                                 let task_id = task.id.clone();
-                                let at = task.schedule.initial_run_time();
-                                queue.insert(Event::new(event_id, at)).await?;
-                                task.state.task_enqueued();
-                                let mut tasks = tasks.write().await;
-                                tasks.insert(task_id, task);
-                            },
-                            ChangeStateEvent::DropTask(id, opts) => {
-                                let mut tasks = tasks.write().await;
-                                let task = tasks.get(&id);
-                                if let Some(task) = task {
-                                    let event_id = id.clone().into();
-                                    queue.pop(&event_id).await?;
-                                    match opts {
-                                        CancelOpts::Ignore => {},
-                                        CancelOpts::Kill => {
-                                            for job in task.state.jobs() {
-                                                executor.cancel(&job).await?;
-                                            }
-                                        },
+                                let mut tasks_guard = tasks.write().await;
+                                if tasks_guard.contains_key(&task_id) {
+                                    let _ = reply.send(Err(Error::DuplicatedTaskId(task_id)));
+                                } else {
+                                    let event_id = task_id.clone();
+                                    match queue.insert(Event::new(event_id, at)).await {
+                                        Ok(()) => {
+                                            task.state.task_enqueued();
+                                            tasks_guard.insert(task_id.clone(), task);
+                                            let _ = reply.send(Ok(task_id));
+                                        }
+                                        Err(e) => {
+                                            let _ = reply.send(Err(e));
+                                        }
                                     }
-                                    tasks.remove(&id);
+                                }
+                            },
+                            ChangeStateEvent::DropTask(id, opts, reply) => {
+                                let mut tasks_guard = tasks.write().await;
+                                let jobs_to_cancel = tasks_guard.get(&id).map(|task| task.state.jobs());
+                                if let Some(jobs_to_cancel) = jobs_to_cancel {
+                                    let event_id = id.clone().into();
+                                    let result: Result<()> = async {
+                                        queue.pop(&event_id).await?;
+                                        if let CancelOpts::Kill = opts {
+                                            for job in jobs_to_cancel {
+                                                executor.cancel(&job).await?;
+                                                // The pending-job cancel path (see
+                                                // `Executor::cancel`) transitions state and
+                                                // requeues directly, without emitting an
+                                                // executor event -- so the executor-event
+                                                // branch's `jobs.remove()` cleanup below
+                                                // will never see it. The owning task is
+                                                // being torn down regardless (it's about to
+                                                // be removed from `tasks`), so clean up the
+                                                // scheduler's own job index eagerly here
+                                                // instead of leaking this entry for the life
+                                                // of the scheduler. Idempotent: if this job
+                                                // was actually dispatched and its
+                                                // `JobCanceled` event arrives later, that
+                                                // cleanup path's own
+                                                // `jobs.remove(..).is_some()` guard just
+                                                // finds nothing to do.
+                                                if jobs.remove(&job).is_some() {
+                                                    jobs_index_size
+                                                        .fetch_sub(1, Ordering::Relaxed);
+                                                }
+                                            }
+                                        }
+                                        Ok(())
+                                    }.await;
+                                    match result {
+                                        Ok(()) => {
+                                            tasks_guard.remove(&id);
+                                            let _ = reply.send(Ok(()));
+                                        }
+                                        Err(e) => {
+                                            let _ = reply.send(Err(e));
+                                        }
+                                    }
+                                } else {
+                                    let _ = reply.send(Err(Error::IncorrectTaskId(id)));
                                 }
                             }
                         }
@@ -503,7 +653,9 @@ impl Scheduler {
                             let job = task.job.clone();
                             let job = Job::new(job_id, job, task.timeout);
                             let job_id = executor.enqueue(job).await?;
-                            jobs.insert(job_id.clone(), task.id.clone());
+                            if jobs.insert(job_id.clone(), task.id.clone()).is_none() {
+                                jobs_index_size.fetch_add(1, Ordering::Relaxed);
+                            }
                             task.state.job_scheduled(job_id);
                             let at = task.schedule.after_start_run_time();
                             if let Some(at) = at {
@@ -517,56 +669,84 @@ impl Scheduler {
                             return Err(event.err().unwrap())
                         }
                     },
-                job_id = executor.work() => {
-                    if let Ok(job_id) = job_id {
-                        debug!(job_id = %job_id, "executor event received");
-                        let mut tasks = tasks.write().await;
-                        let job_state = executor.state(&job_id).await?;
-                        let task_id = jobs.get(&job_id);
-                        if let Some(task_id) = task_id {
-                            let is_finished = {
-                                let task = tasks.get_mut(task_id);
-                                if let Some(task) = task {
-                                    debug!(job_state = ?job_state, "job state changed");
-                                    let mut at = None;
-                                    match job_state {
-                                        JobState::Running => { task.state.job_started(job_id); },
-                                        JobState::Completed => {
-                                            task.state.job_completed(&job_id);
-                                            at = task.schedule.after_finish_run_time();
-                                        },
-                                        JobState::Canceled => {
-                                            task.state.job_canceled(&job_id);
-                                            at = task.schedule.after_finish_run_time();
-                                        },
-                                        JobState::Timeout => {
-                                            task.state.job_timeout(&job_id);
-                                            at = task.schedule.after_finish_run_time();
-                                        },
-                                        JobState::Error => {
-                                            task.state.job_error(&job_id);
-                                            at = task.schedule.after_finish_run_time();
-                                        },
-                                        JobState::Pending | JobState::Starting => {},
-                                    };
-                                    if let Some(at) = at {
-                                        let event_id = task.id.clone();
-                                        queue.insert(Event::new(event_id, at)).await?;
-                                        task.state.task_enqueued();
-                                    }
-                                    task.state.is_task_finished()
-                                } else {
-                                    false
+                event = executor.next_event() => {
+                    match event {
+                        Ok(event) => {
+                            let job_id = match executor.apply(event).await {
+                                Ok(job_id) => job_id,
+                                Err(e) => {
+                                    warn!(error = %e, "error applying executor event");
+                                    continue;
                                 }
                             };
-                            // Remove the task from state if GC is Immediate
-                            if is_finished && garbage_collector == GarbageCollector::Immediate {
-                                debug!(task_id = %task_id, "remove finished task");
-                                tasks.remove(task_id);
+                            debug!(job_id = %job_id, "executor event received");
+                            // `executor.state()` can legitimately miss an id if the job's
+                            // terminal state was already consumed by a previous iteration;
+                            // that's a lost-race, not a scheduler-ending bug, so it's logged
+                            // and skipped instead of propagated with `?` as before.
+                            let job_state = match executor.state(&job_id).await {
+                                Ok(state) => state,
+                                Err(e) => {
+                                    warn!(job_id = %job_id, error = %e, "unknown job id reported by executor, ignoring");
+                                    continue;
+                                }
+                            };
+                            let mut tasks = tasks.write().await;
+                            let task_id = jobs.get(&job_id);
+                            if let Some(task_id) = task_id {
+                                let is_finished = {
+                                    let task = tasks.get_mut(task_id);
+                                    if let Some(task) = task {
+                                        debug!(job_state = ?job_state, "job state changed");
+                                        let mut at = None;
+                                        match job_state {
+                                            JobState::Running => { task.state.job_started(job_id.clone()); },
+                                            JobState::Completed => {
+                                                task.state.job_completed(&job_id);
+                                                at = task.schedule.after_finish_run_time();
+                                            },
+                                            JobState::Canceled => {
+                                                task.state.job_canceled(&job_id);
+                                                at = task.schedule.after_finish_run_time();
+                                            },
+                                            JobState::Timeout => {
+                                                task.state.job_timeout(&job_id);
+                                                at = task.schedule.after_finish_run_time();
+                                            },
+                                            JobState::Error => {
+                                                task.state.job_error(&job_id);
+                                                at = task.schedule.after_finish_run_time();
+                                            },
+                                            JobState::Pending | JobState::Starting => {},
+                                        };
+                                        if let Some(at) = at {
+                                            let event_id = task.id.clone();
+                                            queue.insert(Event::new(event_id, at)).await?;
+                                            task.state.task_enqueued();
+                                        }
+                                        task.state.is_task_finished()
+                                    } else {
+                                        false
+                                    }
+                                };
+                                // Remove the task from state if GC is Immediate
+                                if is_finished && garbage_collector == GarbageCollector::Immediate {
+                                    debug!(task_id = %task_id, "remove finished task");
+                                    tasks.remove(task_id);
+                                }
+                            }
+                            // Regardless of whether the owning task is still around, drop
+                            // this job's entry from the scheduler's own `jobs` index once
+                            // it reaches a terminal state -- otherwise this map grows
+                            // without bound for the life of the scheduler, unseen by any
+                            // `GarbageCollector` setting (which only ever prunes `tasks`).
+                            if job_state.finished() && jobs.remove(&job_id).is_some() {
+                                jobs_index_size.fetch_sub(1, Ordering::Relaxed);
                             }
                         }
-                    } else {
-                        warn!(job_id = ?job_id, "error from executor received");
+                        Err(e) => {
+                            warn!(error = %e, "error from executor received");
+                        }
                     }
                 }
             }
@@ -596,35 +776,68 @@ impl TaskScheduler for Scheduler {
     ///
     /// Right after that task will be staring to execute according to its schedule.
     ///
-    /// Returns [`TaskId`] of the scheduled task or [`Error::DuplicatedTaskId`] if the task with the same `TaskId`
-    /// is already present, even if it's finished but not removed by getting its status or by garbage collector.
+    /// Returns [`TaskId`] of the scheduled task, [`Error::DuplicatedTaskId`] if the task with
+    /// the same `TaskId` is already present (even if it's finished but not removed by getting
+    /// its status or by garbage collector), [`Error::ScheduleOverflow`] if the task's schedule
+    /// requires time arithmetic that overflows the representable `SystemTime` range,
+    /// [`Error::NoUpcomingEvent`] if a cron schedule has no future occurrence at all (e.g. it
+    /// points to an impossible calendar date), or [`Error::SchedulerTerminated`] if the
+    /// scheduler's background loop has already terminated.
+    ///
+    /// Admission is atomic with respect to duplicate ids: this method only returns once the
+    /// scheduler's background loop has itself checked for and rejected duplicates, so two
+    /// concurrent `add()` calls with the same explicit `TaskId` can never both succeed.
     async fn add(&self, task: Task) -> Result<TaskId> {
         debug!(task_id = %task.id(), "add task");
-        let id = task.id();
-        yield_now().await; // to avoid scheduling several tasks within a single async scheduler cycle
-        if self.tasks.read().await.get(&id).is_some() {
-            Err(Error::DuplicatedTaskId(id))
-        } else {
-            self.send_event(ChangeStateEvent::EnqueueTask(task)).await?;
-            Ok(id)
+        if !self.is_alive() {
+            return Err(Error::SchedulerTerminated);
         }
+        let at = task.schedule.initial_run_time()?;
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_event(ChangeStateEvent::EnqueueTask(task, at, reply_tx))
+            .await
+            .map_err(|_e| Error::SchedulerTerminated)?;
+        reply_rx.await.map_err(|_e| Error::SchedulerTerminated)?
     }
 
     /// Removes [`Task`] with specified [`TaskId`] from the scheduler with respect to [`CancelOpts`]:
     /// the task can be killed or left to continue working up to finish.
     ///
-    /// Returns [`Error::IncorrectTaskId`] if the task is not scheduled or cleaned by garbage collector.
+    /// This method only returns once the scheduler's background loop has itself processed the
+    /// cancellation, so a subsequent `add()` of the same `TaskId`, or a subsequent `status()`
+    /// call, is guaranteed to observe the task as already gone.
+    ///
+    /// Returns [`Error::IncorrectTaskId`] if the task is not scheduled or cleaned by garbage
+    /// collector, or [`Error::SchedulerTerminated`] if the scheduler's background loop has
+    /// already terminated.
     async fn cancel(&self, id: TaskId, opts: CancelOpts) -> Result<()> {
         debug!(task_id = %id, ?opts, "cancel task");
-        self.send_event(ChangeStateEvent::DropTask(id, opts)).await
+        if !self.is_alive() {
+            return Err(Error::SchedulerTerminated);
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.send_event(ChangeStateEvent::DropTask(id, opts, reply_tx))
+            .await
+            .map_err(|_e| Error::SchedulerTerminated)?;
+        reply_rx.await.map_err(|_e| Error::SchedulerTerminated)?
     }
 
     /// Returns current [`status`](TaskStatus) of the task.
     ///
+    /// # Warning
     /// If the task is finished, then its status will be removed from the scheduler after
     /// this method call, so the following calls with the same `TaskId` will fail with [`Error::IncorrectTaskId`].
+    /// This is deliberate (not idempotent by design): if you also need [`statistics`](TaskScheduler::statistics)
+    /// for the same finished task, query it *before* calling `status`, since `status` may
+    /// already have removed the task's state.
+    ///
+    /// Returns [`Error::SchedulerTerminated`] instead of stale data if the scheduler's
+    /// background loop has already terminated.
     async fn status(&self, id: &TaskId) -> Result<TaskStatus> {
         debug!(task_id = %id, "task status requested");
+        if !self.is_alive() {
+            return Err(Error::SchedulerTerminated);
+        }
         let mut tasks = self.tasks.write().await;
         let task = tasks.get_mut(id);
 
@@ -643,9 +856,14 @@ impl TaskScheduler for Scheduler {
     /// Returns various statistics about scheduled the task.
     ///
     /// Please refer to the [`TaskStatistics`] documentation for details.
-    /// Returns [`Error::IncorrectTaskId`] if the task is not scheduled or cleaned by garbage collector.
+    /// Returns [`Error::IncorrectTaskId`] if the task is not scheduled or cleaned by garbage
+    /// collector, or [`Error::SchedulerTerminated`] instead of stale data if the scheduler's
+    /// background loop has already terminated.
     async fn statistics(&self, id: &TaskId) -> Result<TaskStatistics> {
         debug!(task_id = %id, "task statistics requested");
+        if !self.is_alive() {
+            return Err(Error::SchedulerTerminated);
+        }
         let tasks = self.tasks.read().await;
         let task = tasks.get(id);
 
@@ -693,8 +911,9 @@ mod test {
     use ntest::timeout;
 
     use super::*;
-    use crate::task::{CronOpts, TaskSchedule};
+    use crate::task::{CronOpts, TaskSchedule, TaskState};
     use std::time::UNIX_EPOCH;
+    use tokio::task::yield_now;
 
     async fn basic_test_suite(
         scheduler: Scheduler,
@@ -1610,5 +1829,190 @@ mod test {
                 .parallelism,
             WorkerParallelism::Unlimited
         );
+    }
+
+    // N3: the scheduler's internal `jobs` index must not grow without bound -- it needs to
+    // shrink back down as jobs finish, regardless of `GarbageCollector` setting (which only
+    // ever prunes `tasks`, never this map). `jobs_index_size()` is `pub(crate)`, so this has
+    // to be a unit test rather than living in `tests/regressions.rs`.
+    #[tokio::test]
+    #[timeout(15000)]
+    async fn n3_job_index_does_not_grow() {
+        let scheduler = SchedulerBuilder::new()
+            .garbage_collector(GarbageCollector::disabled())
+            .build();
+
+        let task = Task::new(TaskSchedule::Interval(Duration::from_millis(100)), |_id| {
+            Box::pin(async move {})
+        });
+        let id = scheduler.add(task).await.unwrap();
+
+        // Let roughly 20+ executions happen.
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+
+        // A leak would have grown this to ~20+ entries; it must stay bounded to (at most) the
+        // handful of jobs that can legitimately be in flight at once.
+        assert!(
+            scheduler.jobs_index_size() <= 2,
+            "jobs index leaked: {} entries",
+            scheduler.jobs_index_size()
+        );
+
+        scheduler.cancel(id, CancelOpts::Kill).await.unwrap();
+        let _ = scheduler.shutdown(ShutdownOpts::IgnoreRunning).await;
+    }
+
+    // N3 (related): a job cancelled while still `pending` in the executor (never dispatched
+    // to a worker, e.g. under saturated `WorkerParallelism::Limited`) must not leak its entry
+    // in the scheduler's `jobs` index either. `Executor::cancel`'s pending-job branch
+    // transitions state and requeues directly instead of emitting an executor event (to avoid
+    // a self-send deadlock against the very scheduler-loop task that would need to drain it),
+    // so the scheduler's `DropTask` handler must clean up this index itself instead of relying
+    // on the executor-event branch, which will never see it.
+    #[tokio::test]
+    #[timeout(10000)]
+    async fn cancel_pending_job_does_not_leak_jobs_index() {
+        let scheduler = Scheduler::new(
+            WorkerType::CurrentRuntime,
+            WorkerParallelism::Limited(1),
+            GarbageCollector::default(),
+        );
+
+        // Occupies the only worker slot so the next job stays `pending` in the executor.
+        let blocker = Task::new(TaskSchedule::Once, |_id| {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            })
+        });
+        scheduler.add(blocker).await.unwrap();
+
+        let victim = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {}));
+        let victim_id = victim.id();
+        scheduler.add(victim).await.unwrap();
+
+        // Give the loop a moment to enqueue both jobs (insert into the `jobs` index) before
+        // cancelling.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(scheduler.jobs_index_size(), 2);
+
+        scheduler.cancel(victim_id, CancelOpts::Kill).await.unwrap();
+
+        assert_eq!(
+            scheduler.jobs_index_size(),
+            1,
+            "the pending-cancelled victim's job entry must not leak in the scheduler's jobs index"
+        );
+
+        let _ = scheduler.shutdown(ShutdownOpts::IgnoreRunning).await;
+    }
+
+    // O5: an oversized `expire_after` (trivially constructible via the public builder) must
+    // not panic the garbage collector; it should just mean "nothing can be expired yet".
+    // `GarbageCollector::collect_garbage` isn't `pub`, so this has to be a unit test.
+    #[tokio::test]
+    #[timeout(5000)]
+    async fn o5_gc_huge_ttl_does_not_panic() {
+        let tasks = Arc::new(RwLock::new(HashMap::new()));
+        let mut task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {}));
+        let job_id = JobId::new(task.id());
+        task.state.task_enqueued();
+        task.state.job_scheduled(job_id.clone());
+        task.state.job_started(job_id.clone());
+        task.state.job_completed(&job_id);
+        assert!(task.state.is_task_finished());
+        tasks.write().await.insert(task.id(), task);
+
+        // `expire_after` reaches before `SystemTime::UNIX_EPOCH`: `checked_sub` would return
+        // `None`, which the old code `.unwrap()`-ed straight into a panic.
+        GarbageCollector::collect_garbage(tasks.clone(), Duration::MAX).await;
+
+        // An oversized TTL means "nothing can be expired yet": the task must still be there.
+        assert_eq!(tasks.read().await.len(), 1);
+    }
+
+    // N7: once the scheduler's background loop has terminated (here simulated the same way a
+    // panic or an unrecoverable internal error would end it -- the loop task simply stops
+    // running), every operation must report `Error::SchedulerTerminated` instead of hanging,
+    // silently serving stale state, or reporting `SendingChangeStateEvent` (which names the
+    // wrong cause). This needs the private `handler` field, so it's a unit test.
+    #[tokio::test]
+    #[timeout(5000)]
+    async fn n7_operations_after_termination_report_scheduler_terminated() {
+        let scheduler = Scheduler::default();
+        assert!(scheduler.is_alive());
+
+        scheduler.handler.abort();
+        // Give the abort a moment to actually land.
+        while !scheduler.handler.is_finished() {
+            yield_now().await;
+        }
+        assert!(!scheduler.is_alive());
+
+        let status = scheduler.status(&TaskId::from("anything")).await;
+        assert!(
+            matches!(status, Err(Error::SchedulerTerminated)),
+            "{status:?}"
+        );
+
+        let stats = scheduler.statistics(&TaskId::from("anything")).await;
+        assert!(
+            matches!(stats, Err(Error::SchedulerTerminated)),
+            "{stats:?}"
+        );
+
+        let task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {}));
+        let add_result = scheduler.add(task).await;
+        assert!(
+            matches!(add_result, Err(Error::SchedulerTerminated)),
+            "{add_result:?}"
+        );
+
+        let cancel_result = scheduler
+            .cancel(TaskId::from("anything"), CancelOpts::Kill)
+            .await;
+        assert!(
+            matches!(cancel_result, Err(Error::SchedulerTerminated)),
+            "{cancel_result:?}"
+        );
+    }
+
+    // O5: a finished task whose `last_finished_at` is unset (a state-machine defect that
+    // shouldn't occur via normal transitions, but the old code `.expect()`-ed it into a
+    // panic) must be skipped, not crash the collector, and must stay in `tasks`.
+    #[tokio::test]
+    #[timeout(5000)]
+    async fn o5_gc_skips_task_without_finished_at() {
+        let tasks = Arc::new(RwLock::new(HashMap::new()));
+        let mut task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {}));
+        task.state = TaskState::test_finished_without_last_finished_at();
+        assert!(task.state.is_task_finished());
+        assert_eq!(task.state.last_finished_at(), None);
+        tasks.write().await.insert(task.id(), task);
+
+        GarbageCollector::collect_garbage(tasks.clone(), Duration::from_millis(1)).await;
+
+        assert_eq!(
+            tasks.read().await.len(),
+            1,
+            "a finished task with no `last_finished_at` must be skipped, not removed"
+        );
+    }
+
+    #[tokio::test]
+    #[timeout(5000)]
+    async fn o5_gc_still_collects_expired() {
+        let tasks = Arc::new(RwLock::new(HashMap::new()));
+        let mut task = Task::new(TaskSchedule::Once, |_id| Box::pin(async move {}));
+        let job_id = JobId::new(task.id());
+        task.state.task_enqueued();
+        task.state.job_scheduled(job_id.clone());
+        task.state.job_started(job_id.clone());
+        task.state.job_completed(&job_id);
+        tasks.write().await.insert(task.id(), task);
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        GarbageCollector::collect_garbage(tasks.clone(), Duration::from_millis(1)).await;
+
+        assert!(tasks.read().await.is_empty());
     }
 }

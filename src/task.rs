@@ -1,7 +1,7 @@
 //! [`Task`] object represents a single job with schedule.
 //! Use it to create workload of different types and post it to `Scheduler`.
 //!
-//! Module contains everything related to [`Task`], it's [`TaskSchedule`] and [`state`](TaskStatus).
+//! Module contains everything related to [`Task`], its [`TaskSchedule`] and [`state`](TaskStatus).
 //!
 use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error};
 use chrono::{DateTime, Local};
@@ -15,7 +15,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 /// `Task` represents a single job with its schedule, attributes, and state.
@@ -30,6 +30,19 @@ pub struct Task {
 
 impl Task {
     /// Creates new Task with specified schedule, job function and default [`TaskId`].
+    ///
+    /// # Note on the job factory
+    ///
+    /// The `job` factory is `FnMut`, stored behind a shared lock so it may keep and mutate
+    /// its own state across runs. That lock is held only while *constructing* the future
+    /// (i.e. while the factory closure itself runs), not while the returned future executes,
+    /// so it never serializes job execution. It does, however, serialize future
+    /// *construction*: with [`CronOpts::concurrent`] set to `true`, several runs of the same
+    /// task execute concurrently, but each run's factory invocation still happens one at a
+    /// time. If the factory panics, the worker catches it and reports the job as
+    /// [`errored`](TaskStatus::Finished) instead of taking down the whole scheduler -- except
+    /// under a `panic = "abort"` build profile, where any panic still aborts the process
+    /// regardless.
     ///
     /// # Examples
     ///
@@ -204,7 +217,7 @@ impl Task {
     /// Create a new [`Task`] with a specified schedule, job function and explicit [`TaskId`].
     ///
     /// This method is useful if you need to know [`TaskId`] before a task is scheduled.
-    /// Or need to use [`TaskId`] within job context: for a particular task it's TaskId is constant value,
+    /// Or need to use [`TaskId`] within job context: for a particular task its TaskId is constant value,
     /// but JobId varies for each task run.
     ///
     /// # Note:
@@ -257,7 +270,7 @@ impl Task {
         }
     }
 
-    /// Returns task's [`TaskId`], it can be used to `drop` task or to get it's `status` or `statistics`.
+    /// Returns task's [`TaskId`], it can be used to `drop` task or to get its `status` or `statistics`.
     pub fn id(&self) -> TaskId {
         self.id.clone()
     }
@@ -380,8 +393,16 @@ impl Display for TaskId {
 ///   So there can be a single working job only with this type of schedule.
 /// - `IntervalDelayed`: its behavior is similar to `Interval` but scheduler starts first job with some specified delay.
 /// - `Cron`: the most flexible schedule type which uses well-known cron [`expressions`](CronSchedule) to define time to run
-///   and [`CronOpts`] parameter which defines the behavior of task right after adding to scheduler (start first job immediately or
+///   and [`CronOpts`] parameter which defines the behavior of task right after adding to scheduler (start the first job immediately or
 ///   strictly according to the schedule) and allows or restricts concurrent running of jobs.
+///
+/// ## Note on wall-clock time
+///
+/// `OnceDelayed`, `Interval` and `IntervalDelayed` compute their next run time relative to
+/// wall-clock (`SystemTime::now()`), not a monotonic clock. A system clock step (e.g. NTP
+/// correction) will shift the effective wait accordingly: stepping the clock backwards makes
+/// the next run happen later than intended, stepping it forwards makes it happen earlier.
+/// `Cron` schedules are wall-clock by nature and unaffected by this note.
 ///
 /// ## Examples
 ///
@@ -420,19 +441,36 @@ pub enum TaskSchedule {
 }
 
 impl TaskSchedule {
-    pub(crate) fn initial_run_time(&self) -> SystemTime {
+    /// Computes the time of the first run of the task and, where applicable, validates that
+    /// every duration the schedule will ever need (not just the initial one) fits within the
+    /// representable `SystemTime` range.
+    ///
+    /// Returns [`Error::ScheduleOverflow`] if any required time arithmetic overflows, and
+    /// [`Error::NoUpcomingEvent`] if a cron schedule (not starting immediately) has no future
+    /// occurrence at all (e.g. it points to an impossible calendar date).
+    pub(crate) fn initial_run_time(&self) -> crate::Result<SystemTime> {
+        let now = SystemTime::now();
         match self {
-            TaskSchedule::Once => SystemTime::now(),
-            TaskSchedule::OnceDelayed(delay) => SystemTime::now().checked_add(*delay).unwrap(),
-            TaskSchedule::Interval(_interval) => SystemTime::now(),
-            TaskSchedule::IntervalDelayed(_interval, delay) => {
-                SystemTime::now().checked_add(*delay).unwrap()
+            TaskSchedule::Once => Ok(now),
+            TaskSchedule::OnceDelayed(delay) => {
+                now.checked_add(*delay).ok_or(Error::ScheduleOverflow)
+            }
+            TaskSchedule::Interval(interval) => {
+                // Validate the periodic interval up front too: it isn't used for the initial
+                // run, but it will overflow at the very first reschedule otherwise.
+                now.checked_add(*interval).ok_or(Error::ScheduleOverflow)?;
+                Ok(now)
+            }
+            TaskSchedule::IntervalDelayed(interval, delay) => {
+                let at = now.checked_add(*delay).ok_or(Error::ScheduleOverflow)?;
+                now.checked_add(*interval).ok_or(Error::ScheduleOverflow)?;
+                Ok(at)
             }
             TaskSchedule::Cron(schedule, opts) => {
                 if opts.at_start {
-                    SystemTime::now()
+                    Ok(now)
                 } else {
-                    schedule.upcoming()
+                    schedule.upcoming().ok_or(Error::NoUpcomingEvent)
                 }
             }
         }
@@ -442,7 +480,7 @@ impl TaskSchedule {
         match self {
             TaskSchedule::Cron(schedule, opts) => {
                 if opts.concurrent {
-                    Some(schedule.upcoming())
+                    schedule.upcoming()
                 } else {
                     None
                 }
@@ -453,11 +491,32 @@ impl TaskSchedule {
             TaskSchedule::IntervalDelayed(_, _) => None,
         }
     }
+
+    /// Computes the time of the next run after a job finished, or `None` if the task
+    /// shouldn't be rescheduled anymore (either by design, e.g. `Once`, or because its
+    /// schedule ran out, e.g. a cron expression with no more upcoming occurrences, or a
+    /// duration that overflows the representable `SystemTime` range).
     pub(crate) fn after_finish_run_time(&self) -> Option<SystemTime> {
         match self {
-            TaskSchedule::Interval(interval) => Some(SystemTime::now().checked_add(*interval)?),
+            TaskSchedule::Interval(interval) => {
+                let at = SystemTime::now().checked_add(*interval);
+                if at.is_none() {
+                    warn!(
+                        ?interval,
+                        "interval overflows system time range, task won't be rescheduled"
+                    );
+                }
+                at
+            }
             TaskSchedule::IntervalDelayed(interval, _delay) => {
-                Some(SystemTime::now().checked_add(*interval)?)
+                let at = SystemTime::now().checked_add(*interval);
+                if at.is_none() {
+                    warn!(
+                        ?interval,
+                        "interval overflows system time range, task won't be rescheduled"
+                    );
+                }
+                at
             }
             TaskSchedule::Once => None,
             TaskSchedule::OnceDelayed(_) => None,
@@ -465,7 +524,7 @@ impl TaskSchedule {
                 if opts.concurrent {
                     None
                 } else {
-                    Some(schedule.upcoming())
+                    schedule.upcoming()
                 }
             }
         }
@@ -588,7 +647,11 @@ impl TaskState {
     }
 
     pub(crate) fn job_scheduled(&mut self, id: JobId) -> &Self {
-        self.statistics.waiting -= 1;
+        debug_assert!(
+            self.statistics.waiting > 0,
+            "job_scheduled: waiting counter underflow"
+        );
+        self.statistics.waiting = self.statistics.waiting.saturating_sub(1);
         self.statistics.scheduled += 1;
         self.scheduled_jobs.insert(id);
         debug!(status = ?self.status(), "job scheduled");
@@ -596,7 +659,11 @@ impl TaskState {
     }
 
     pub(crate) fn job_started(&mut self, id: JobId) -> &Self {
-        self.statistics.scheduled -= 1;
+        debug_assert!(
+            self.statistics.scheduled > 0,
+            "job_started: scheduled counter underflow"
+        );
+        self.statistics.scheduled = self.statistics.scheduled.saturating_sub(1);
         self.statistics.running += 1;
         self.scheduled_jobs.remove(&id);
         self.running_jobs.insert(id);
@@ -605,7 +672,11 @@ impl TaskState {
     }
 
     pub(crate) fn job_completed(&mut self, id: &JobId) -> &Self {
-        self.statistics.running -= 1;
+        debug_assert!(
+            self.statistics.running > 0,
+            "job_completed: running counter underflow"
+        );
+        self.statistics.running = self.statistics.running.saturating_sub(1);
         self.statistics.completed += 1;
         self.running_jobs.remove(id);
         self.last_finished_at = Some(SystemTime::now());
@@ -616,10 +687,18 @@ impl TaskState {
     pub(crate) fn job_canceled(&mut self, id: &JobId) -> &Self {
         self.statistics.canceled += 1;
         if self.running_jobs.remove(id) {
-            self.statistics.running -= 1;
+            debug_assert!(
+                self.statistics.running > 0,
+                "job_canceled: running counter underflow"
+            );
+            self.statistics.running = self.statistics.running.saturating_sub(1);
         } else {
             self.scheduled_jobs.remove(id);
-            self.statistics.scheduled -= 1;
+            debug_assert!(
+                self.statistics.scheduled > 0,
+                "job_canceled: scheduled counter underflow"
+            );
+            self.statistics.scheduled = self.statistics.scheduled.saturating_sub(1);
         }
         self.last_finished_at = Some(SystemTime::now());
         debug!(status = ?self.status(), "job canceled");
@@ -627,7 +706,11 @@ impl TaskState {
     }
 
     pub(crate) fn job_timeout(&mut self, id: &JobId) -> &Self {
-        self.statistics.running -= 1;
+        debug_assert!(
+            self.statistics.running > 0,
+            "job_timeout: running counter underflow"
+        );
+        self.statistics.running = self.statistics.running.saturating_sub(1);
         self.statistics.timeouts += 1;
         self.running_jobs.remove(id);
         self.last_finished_at = Some(SystemTime::now());
@@ -636,7 +719,11 @@ impl TaskState {
     }
 
     pub(crate) fn job_error(&mut self, id: &JobId) -> &Self {
-        self.statistics.running -= 1;
+        debug_assert!(
+            self.statistics.running > 0,
+            "job_error: running counter underflow"
+        );
+        self.statistics.running = self.statistics.running.saturating_sub(1);
         self.statistics.errors += 1;
         self.running_jobs.remove(id);
         self.last_finished_at = Some(SystemTime::now());
@@ -665,6 +752,18 @@ impl TaskState {
         jobs.extend(self.scheduled_jobs.clone());
         jobs.extend(self.running_jobs.clone());
         jobs
+    }
+
+    /// Test-only seam: every real terminal transition (`job_completed`/`job_canceled`/
+    /// `job_timeout`/`job_error`) also sets `last_finished_at`, so a finished task without
+    /// it is currently unreachable through normal state transitions. This constructs that
+    /// otherwise-unreachable state directly, so the garbage collector's defensive handling
+    /// of it (see `GarbageCollector::collect_garbage`) can be regression-tested.
+    #[cfg(test)]
+    pub(crate) fn test_finished_without_last_finished_at() -> Self {
+        let mut state = Self::default();
+        state.statistics.completed = 1;
+        state
     }
 }
 
@@ -707,9 +806,11 @@ impl Display for CronSchedule {
 }
 
 impl CronSchedule {
-    fn upcoming(&self) -> SystemTime {
-        let next: SystemTime = self.schedule.upcoming(&Local::now()).unwrap().into();
-        next
+    /// Returns the next occurrence of the schedule, or `None` if there is none (e.g. an
+    /// impossible calendar date, a past-only year, or any schedule beyond the underlying
+    /// cron engine's representable range).
+    fn upcoming(&self) -> Option<SystemTime> {
+        self.schedule.upcoming(&Local::now()).map(SystemTime::from)
     }
 }
 
@@ -722,6 +823,14 @@ impl TryFrom<String> for CronSchedule {
         Ok(Self {
             schedule: Box::new(schedule),
         })
+    }
+}
+
+impl std::str::FromStr for CronSchedule {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::try_from(value.to_string())
     }
 }
 
@@ -756,6 +865,8 @@ mod test {
     fn cron_with_seconds() {
         let cron: Result<CronSchedule> = " *    * * * * *".try_into();
         assert!(cron.is_ok());
+        assert!(" *    * * * * *".parse::<CronSchedule>().is_ok());
+        assert!("not a cron".parse::<CronSchedule>().is_err());
 
         let cron: Result<CronSchedule> = " 5  * * * * * ".try_into();
         assert!(cron.is_ok());
@@ -1291,6 +1402,8 @@ mod test {
 
         assert_eq!(String::from(TaskId::from(uuid_id)), str_id);
         assert_eq!(String::from(&TaskId::from(uuid_id)), str_id);
+
+        assert_ne!(TaskId::default(), TaskId::default());
     }
 
     #[test]
@@ -1362,12 +1475,137 @@ mod test {
             .with_id("TEST_WITH_TIMEOUT")
             .with_timeout(Duration::from_secs(1));
 
-        assert_eq!(format!("{task1:?}"), format!("Task {{ id: TaskId {{ id: \"TEST\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: None }}"));
-        assert_eq!(format!("{task2:?}"), format!("Task {{ id: TaskId {{ id: \"TEST_WITH_TIMEOUT\" }}, schedule: Once, state: TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"None\" }}, timeout: Some(1s) }}"));
+        assert_eq!(format!("{task1:?}"), "Task { id: TaskId { id: \"TEST\" }, schedule: Once, state: TaskState { waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }, timeout: None }");
+        assert_eq!(format!("{task2:?}"), "Task { id: TaskId { id: \"TEST_WITH_TIMEOUT\" }, schedule: Once, state: TaskState { waiting: 0, scheduled: 0, running: 0, completed: 0, canceled: 0, timeouts: 0, errors: 0, scheduled_jobs: {}, running_jobs: {}, last_finished_at: \"None\" }, timeout: Some(1s) }");
 
         assert_eq!(
             format!("{}", CronSchedule::try_from("1 2 3 4 ?").unwrap()),
             String::from("0 1 2 3 4 ? *")
         );
+    }
+
+    // O2: a cron expression that parses but has no future occurrence must not panic.
+    #[test]
+    fn o2_impossible_calendar_date_upcoming_is_none() {
+        // February 30th never exists.
+        let cron: CronSchedule = "0 0 0 30 2 *".try_into().unwrap();
+        assert_eq!(cron.upcoming(), None);
+    }
+
+    #[test]
+    fn o2_past_only_year_upcoming_is_none() {
+        let cron: CronSchedule = "0 0 0 1 1 ? 2020".try_into().unwrap();
+        assert_eq!(cron.upcoming(), None);
+    }
+
+    #[test]
+    fn o2_initial_run_time_rejects_no_upcoming_cron() {
+        let schedule = TaskSchedule::Cron(
+            "0 0 0 30 2 *".try_into().unwrap(),
+            CronOpts {
+                at_start: false,
+                concurrent: false,
+            },
+        );
+        assert!(matches!(
+            schedule.initial_run_time(),
+            Err(Error::NoUpcomingEvent)
+        ));
+    }
+
+    #[test]
+    fn o2_at_start_bypasses_no_upcoming_cron_on_admission() {
+        // With `at_start: true`, admission doesn't need an upcoming occurrence: the first
+        // job runs immediately, and the task simply finishes afterwards (no reschedule).
+        let schedule = TaskSchedule::Cron(
+            "0 0 0 30 2 *".try_into().unwrap(),
+            CronOpts {
+                at_start: true,
+                concurrent: false,
+            },
+        );
+        assert!(schedule.initial_run_time().is_ok());
+        assert_eq!(schedule.after_finish_run_time(), None);
+    }
+
+    // O1: duration arithmetic overflow must be rejected, not panic.
+    #[test]
+    fn o1_once_delayed_overflow_is_rejected() {
+        let schedule = TaskSchedule::OnceDelayed(Duration::MAX);
+        assert!(matches!(
+            schedule.initial_run_time(),
+            Err(Error::ScheduleOverflow)
+        ));
+    }
+
+    #[test]
+    fn o1_interval_overflow_is_rejected_at_admission() {
+        let schedule = TaskSchedule::Interval(Duration::MAX);
+        assert!(matches!(
+            schedule.initial_run_time(),
+            Err(Error::ScheduleOverflow)
+        ));
+    }
+
+    // N9: `IntervalDelayed`'s *interval* must be validated at admission too, not only its
+    // delay -- otherwise a valid delay with an overflowing interval passes admission and
+    // only fails (silently) at the first reschedule.
+    #[test]
+    fn n9_interval_delayed_validates_both_fields() {
+        let schedule = TaskSchedule::IntervalDelayed(Duration::MAX, Duration::from_millis(10));
+        assert!(matches!(
+            schedule.initial_run_time(),
+            Err(Error::ScheduleOverflow)
+        ));
+    }
+
+    #[test]
+    fn interval_delayed_valid_schedule_is_accepted() {
+        let schedule =
+            TaskSchedule::IntervalDelayed(Duration::from_secs(1), Duration::from_millis(10));
+        assert!(schedule.initial_run_time().is_ok());
+    }
+
+    // N9: reschedule-time overflow degrades to "stop rescheduling", not a panic, matching
+    // the admission-time error for the same input.
+    #[test]
+    fn interval_after_finish_overflow_returns_none() {
+        let schedule = TaskSchedule::Interval(Duration::MAX);
+        assert_eq!(schedule.after_finish_run_time(), None);
+    }
+
+    // N9: same degrade-to-"stop rescheduling" behavior for `IntervalDelayed`'s periodic
+    // interval, not just its initial delay.
+    #[test]
+    fn interval_delayed_after_finish_overflow_returns_none() {
+        let schedule = TaskSchedule::IntervalDelayed(Duration::MAX, Duration::from_millis(10));
+        assert_eq!(schedule.after_finish_run_time(), None);
+    }
+
+    // Step 4b: an out-of-order transition (which normal scheduler flows never trigger) must
+    // fail loudly in debug builds via `debug_assert!` ...
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "job_scheduled: waiting counter underflow")]
+    fn task_state_counters_fail_loudly_in_debug_on_invalid_transition() {
+        let job = JobId::new("job");
+        let mut state = TaskState::default();
+        // Calling job_scheduled without a preceding task_enqueued underflows `waiting`.
+        state.job_scheduled(job);
+    }
+
+    // ... and degrade to saturating at 0 instead of wrapping/corrupting in release builds
+    // (where `debug_assert!` compiles out). This is what actually protects production if
+    // `overflow-checks` is off, as it is by default: an unchecked `-= 1` from 0 would
+    // silently wrap `waiting` to `usize::MAX`, permanently corrupting the task's public
+    // statistics and making `is_task_finished()` never become true again.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn task_state_counters_saturate_instead_of_underflow_in_release() {
+        let job = JobId::new("job");
+        let mut state = TaskState::default();
+        state.job_scheduled(job);
+        assert_eq!(state.statistics.waiting, 0);
+        assert_eq!(state.statistics.scheduled, 1);
     }
 }

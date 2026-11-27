@@ -4,17 +4,17 @@ use crate::{
     scheduler::{CancelOpts, RuntimeThreads, ShutdownOpts, WorkerType},
     ControlChannel, Error, Result,
 };
-use futures::future::select_all;
-use std::collections::HashMap;
-use tokio::{join, select, sync::mpsc::Sender, task::JoinHandle};
+use std::{collections::HashMap, panic::AssertUnwindSafe};
+use tokio::{
+    join, select,
+    sync::mpsc::Sender,
+    task::{AbortHandle, JoinHandle, JoinSet},
+};
 use tracing::{debug, instrument, warn};
-use uuid::Uuid;
 
 const WORKER_CONTROL_CHANNEL_SIZE: usize = 1024;
 
 pub trait AsyncWorker {
-    /// Start one more job
-    async fn start(&self, job: Job) -> Result<JobId>;
     /// Cancel a single running job
     async fn cancel(&self, id: &JobId) -> Result<()>;
     /// Shutdown worker
@@ -41,26 +41,32 @@ enum JobExecutionResult {
 }
 
 impl Worker {
-    pub fn new(type_: WorkerType, executor_channel: Sender<ChangeExecutorStateEvent>) -> Self {
+    /// Constructs a new worker. Returns [`Error::InvalidWorkerConfig`] instead of panicking
+    /// when the requested worker configuration is invalid (e.g. zero worker threads) or the
+    /// underlying `Tokio` runtime can't be constructed (e.g. due to OS resource limits).
+    pub fn try_new(
+        type_: WorkerType,
+        executor_channel: Sender<ChangeExecutorStateEvent>,
+    ) -> Result<Self> {
         let worker_channel = ControlChannel::<ChangeStateEvent>::new(WORKER_CONTROL_CHANNEL_SIZE);
         let worker_sender = worker_channel.sender();
 
         debug!(worker_type = ?type_, "construct new worker");
         match type_ {
-            WorkerType::CurrentRuntime => Self {
+            WorkerType::CurrentRuntime => Ok(Self {
                 tokio_handler: Some(tokio::task::spawn(Self::worker(
                     executor_channel,
                     worker_channel,
                 ))),
                 thread_handler: None,
                 channel: worker_sender,
-            },
+            }),
             WorkerType::CurrentThread => {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
-                    .unwrap();
-                Self {
+                    .map_err(|_e| Error::InvalidWorkerConfig)?;
+                Ok(Self {
                     tokio_handler: None,
                     thread_handler: Some(std::thread::spawn(move || {
                         rt.block_on(
@@ -68,17 +74,23 @@ impl Worker {
                         );
                     })),
                     channel: worker_sender,
-                }
+                })
             }
             WorkerType::MultiThread(threads) => {
+                if let RuntimeThreads::Limited(0) = threads {
+                    return Err(Error::InvalidWorkerConfig);
+                }
                 let mut rt = tokio::runtime::Builder::new_multi_thread();
                 let rt = if let RuntimeThreads::Limited(threads) = threads {
                     rt.worker_threads(threads)
                 } else {
                     &mut rt
                 };
-                let rt = rt.enable_all().build().unwrap();
-                Self {
+                let rt = rt
+                    .enable_all()
+                    .build()
+                    .map_err(|_e| Error::InvalidWorkerConfig)?;
+                Ok(Self {
                     tokio_handler: None,
                     thread_handler: Some(std::thread::spawn(move || {
                         rt.block_on(
@@ -86,7 +98,7 @@ impl Worker {
                         );
                     })),
                     channel: worker_sender,
-                }
+                })
             }
         }
     }
@@ -96,58 +108,86 @@ impl Worker {
         executor_channel: Sender<ChangeExecutorStateEvent>,
         worker_channel: ControlChannel<ChangeStateEvent>,
     ) {
-        let mut ids: Vec<JobId> = Vec::new();
-        let mut handlers: Vec<JoinHandle<JobExecutionResult>> = Vec::new();
-
-        // Push a single always-pending job to avoid panics on empty select_all
-        let fake_id = JobId::new(Uuid::new_v4());
-        let fake_handler = tokio::task::spawn(Box::pin(async {
-            futures::future::pending::<JobExecutionResult>().await
-        }));
-        ids.push(fake_id);
-        handlers.push(fake_handler);
+        // Jobs run as tasks in this `JoinSet`, each carrying its own `JobId` in its output so
+        // there's no need for a separate index vector to correlate a finished task back to a
+        // job (as a plain `Vec<JoinHandle<_>>` would require). `JoinSet::join_next` also
+        // returns `None` immediately on an empty set instead of panicking (as
+        // `futures::future::select_all` would on an empty slice), so no permanently-pending
+        // sentinel task is needed either.
+        let mut jobs: JoinSet<(JobId, JobExecutionResult)> = JoinSet::new();
+        let mut abort_handles: HashMap<JobId, AbortHandle> = HashMap::new();
 
         loop {
+            // Deliberately not `biased`: a sustained burst of `StartJob` commands must not
+            // be able to starve draining `jobs.join_next()` forever, since job completions
+            // feed the executor's own dispatch loop (a stuck drain here can cascade into a
+            // stall further up).
             select! {
-                biased;
                 event = worker_channel.receive() => {
                     if let Some(event) = event {
                         debug!(?event, "event received");
                         match event {
                             ChangeStateEvent::StartJob(job) => {
                                 let id = job.id();
-                                let job_to_run = &job.job();
-                                let job_to_run = (job_to_run.write().await)(id);
+                                let built = {
+                                    let factory = job.job();
+                                    let mut factory = factory.write().await;
+                                    // A panic here -- as opposed to a panic in the *future*
+                                    // the factory returns, which `tokio::spawn` already turns
+                                    // into a normal `JobState::Error` -- would otherwise
+                                    // unwind this whole loop and silently paralyze the
+                                    // worker forever. `AssertUnwindSafe` is safe here: on
+                                    // panic the half-built future is simply discarded and
+                                    // `tokio::sync::RwLock` never poisons, so the lock stays
+                                    // perfectly usable for the next job. Note this has no
+                                    // effect under `panic = "abort"`.
+                                    std::panic::catch_unwind(AssertUnwindSafe(|| (factory)(id.clone())))
+                                };
 
-                                ids.push(job.id());
+                                match built {
+                                    Ok(job_to_run) => {
+                                        let abort_handle = if let Some(timeout) = job.timeout() {
+                                            let id = job.id();
+                                            jobs.spawn(async move {
+                                                let result = select! {
+                                                    _ = job_to_run => JobExecutionResult::Completed,
+                                                    _ = tokio::time::sleep(timeout) => JobExecutionResult::Timeout,
+                                                };
+                                                (id, result)
+                                            })
+                                        } else {
+                                            let id = job.id();
+                                            jobs.spawn(async move {
+                                                job_to_run.await;
+                                                (id, JobExecutionResult::Completed)
+                                            })
+                                        };
+                                        abort_handles.insert(job.id(), abort_handle);
 
-                                if let Some(timeout) = job.timeout() {
-                                    let handler = tokio::task::spawn(Box::pin(async move {
-                                        select! {
-                                            _ = job_to_run => {JobExecutionResult::Completed},
-                                            _ = tokio::time::sleep(timeout) => {JobExecutionResult::Timeout}
-                                            }
-                                        }
-                                    ));
-                                    handlers.push(handler);
-                                } else {
-                                    let handler = tokio::task::spawn(Box::pin(async move {job_to_run.await; JobExecutionResult::Completed}));
-                                    handlers.push(handler);
+                                        let _ = executor_channel
+                                            .send(ChangeExecutorStateEvent::JobStarted(job.id()))
+                                            .await
+                                            .map_err(|_e| Error::SendingChangeStateEvent);
+                                    },
+                                    Err(_payload) => {
+                                        warn!(job_id = %id, "task factory panicked, job will not start");
+                                        // Two events, in this order, so the paired
+                                        // `scheduled -> running -> errors` counters in
+                                        // `TaskState` stay balanced with zero changes needed
+                                        // there: `job_error` assumes the job reached
+                                        // `Running`, so it must get there first.
+                                        let _ = executor_channel
+                                            .send(ChangeExecutorStateEvent::JobStarted(id.clone()))
+                                            .await;
+                                        let _ = executor_channel
+                                            .send(ChangeExecutorStateEvent::JobError(id))
+                                            .await;
+                                    },
                                 }
-
-                                let _ = executor_channel
-                                    .send(ChangeExecutorStateEvent::JobStarted(job.id()))
-                                    .await
-                                    .map_err(|_e| Error::SendingChangeStateEvent);
                             },
                             ChangeStateEvent::CancelJob(id) => {
-                                let ids_map: HashMap<&JobId, usize> = ids.iter().enumerate().map(|(i, id)| (id, i)).collect();
-                                let index = ids_map.get(&id);
-                                if let Some(index) = index {
-                                    let index = *index;
-                                    ids.remove(index);
-                                    let handler = handlers.remove(index);
-                                    handler.abort();
+                                if let Some(abort_handle) = abort_handles.remove(&id) {
+                                    abort_handle.abort();
                                     let _ = executor_channel
                                         .send(ChangeExecutorStateEvent::JobCanceled(id))
                                         .await
@@ -155,32 +195,38 @@ impl Worker {
                                 }
                             },
                             ChangeStateEvent::Shutdown(opts) => {
-                                // Remove fake (forever pending) handler
-                                handlers.remove(0);
-                                if !handlers.is_empty() {
-                                    match opts {
-                                        ShutdownOpts::IgnoreRunning => {},
-                                        ShutdownOpts::CancelTasks(cancel_opts) => {
-                                            match cancel_opts {
-                                                CancelOpts::Ignore => {},
-                                                CancelOpts::Kill => {
-                                                    for handler in handlers {
-                                                        handler.abort();
-                                                    }
-                                                },
-                                            }
-                                        },
-                                        ShutdownOpts::WaitForFinish => {
-                                            futures::future::join_all(handlers).await;
-                                        },
-                                        ShutdownOpts::WaitFor(timeout) => {
-                                            select! {
-                                                _ = futures::future::join_all(handlers) => { debug!("shutdown completed") },
-                                                _ = tokio::time::sleep(timeout) => { debug!("shutdown timed out") },
-                                            }
-                                        },
-                                    };
-                                }
+                                match opts {
+                                    // `IgnoreRunning` doesn't make the *caller* wait (see
+                                    // `Worker::shutdown` below, which returns immediately for
+                                    // this variant without joining this loop's thread), but
+                                    // the loop itself must still wait for jobs here: for a
+                                    // dedicated worker runtime (`CurrentThread`/`MultiThread`)
+                                    // this function's return is what lets `rt.block_on`
+                                    // return, which is what finally drops the runtime -- and
+                                    // dropping a runtime aborts everything still running on
+                                    // it. Waiting here keeps the (detached, unjoined) runtime
+                                    // thread alive until its jobs actually finish, instead of
+                                    // aborting them. The residual caveat -- jobs are still
+                                    // lost if the whole process exits first -- is inherent
+                                    // and documented on `ShutdownOpts::IgnoreRunning`.
+                                    ShutdownOpts::IgnoreRunning | ShutdownOpts::WaitForFinish => {
+                                        jobs.join_all().await;
+                                    },
+                                    ShutdownOpts::CancelTasks(cancel_opts) => {
+                                        match cancel_opts {
+                                            CancelOpts::Ignore => {},
+                                            CancelOpts::Kill => {
+                                                jobs.abort_all();
+                                            },
+                                        }
+                                    },
+                                    ShutdownOpts::WaitFor(timeout) => {
+                                        select! {
+                                            _ = jobs.join_all() => { debug!("shutdown completed") },
+                                            _ = tokio::time::sleep(timeout) => { debug!("shutdown timed out") },
+                                        }
+                                    },
+                                };
                                 break
                             },
                         }
@@ -189,18 +235,12 @@ impl Worker {
                         break
                     }
                 },
-                completed = select_all(&mut handlers.iter_mut()) => {
-                    let (result, index, _) = completed;
-                    let id = ids.get(index);
-
-                    if let Some(id) = id {
-                        let id = id.clone();
-                        ids.remove(index);
-                        handlers.remove(index);
-
-                        let job_completion_state = match result {
-                            Ok(completion_result) => {
-                                match completion_result {
+                completed = jobs.join_next(), if !jobs.is_empty() => {
+                    if let Some(completed) = completed {
+                        match completed {
+                            Ok((id, completion_result)) => {
+                                abort_handles.remove(&id);
+                                let job_completion_state = match completion_result {
                                     JobExecutionResult::Completed => {
                                         debug!(job_id = ?id, "job completed successfully");
                                         ChangeExecutorStateEvent::JobCompleted(id)
@@ -209,22 +249,42 @@ impl Worker {
                                         debug!(job_id = ?id, "job killed because timeout");
                                         ChangeExecutorStateEvent::JobTimeout(id)
                                     },
-                                }
+                                };
+                                let _ = executor_channel
+                                    .send(job_completion_state)
+                                    .await
+                                    .map_err(|_e| Error::SendingChangeStateEvent);
                             },
-                            Err(error) => {
-                                debug!(job_id = ?id, %error, "job finished with error");
-                                ChangeExecutorStateEvent::JobError(id)
+                            Err(join_error) => {
+                                // Either a genuine panic in the spawned task (extremely
+                                // unlikely: the task body itself never panics, only user
+                                // code inside the awaited future could, and that already
+                                // unwinds within `tokio::spawn`'s own catch boundary), or an
+                                // abort we issued ourselves via `CancelJob` -- which already
+                                // sent `JobCanceled` at cancellation time and already removed
+                                // the entry from `abort_handles`. Either way there's nothing
+                                // left to reconcile here.
+                                debug!(%join_error, "job task ended abnormally");
                             },
-                        };
-                        let _ = executor_channel
-                            .send(job_completion_state)
-                            .await
-                            .map_err(|_e| Error::SendingChangeStateEvent);
-                    } else {
-                        debug!(?result, "unexpected job finished")
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /// Non-blocking dispatch: tries to hand the job to this worker's control channel without
+    /// waiting for capacity. Returns the job back on `Err` if the channel is currently
+    /// saturated (or closed), so the caller can decide how to handle backpressure instead of
+    /// blocking indefinitely on a full channel.
+    pub(crate) fn try_start(&self, job: Job) -> std::result::Result<(), Job> {
+        match self.channel.try_send(ChangeStateEvent::StartJob(job)) {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(ChangeStateEvent::StartJob(job)))
+            | Err(tokio::sync::mpsc::error::TrySendError::Closed(ChangeStateEvent::StartJob(
+                job,
+            ))) => Err(job),
+            Err(_) => unreachable!("only StartJob events are ever sent from try_start"),
         }
     }
 
@@ -237,13 +297,6 @@ impl Worker {
 }
 
 impl AsyncWorker for Worker {
-    async fn start(&self, job: Job) -> Result<JobId> {
-        let id = job.id();
-        debug!(job_id = %id, "start job");
-        self.send_event(ChangeStateEvent::StartJob(job)).await?;
-        Ok(id)
-    }
-
     async fn cancel(&self, id: &JobId) -> Result<()> {
         debug!(job_id = %id, "cancel job");
         self.send_event(ChangeStateEvent::CancelJob(id.clone()))

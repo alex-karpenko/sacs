@@ -74,8 +74,8 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use task::TaskId;
 use thiserror::Error;
 use tokio::sync::{
-    mpsc::{self, error::SendError, Receiver, Sender},
-    RwLock,
+    mpsc::{self, Receiver, Sender},
+    Mutex,
 };
 
 const DEFAULT_CONTROL_CHANNEL_SIZE: usize = 16;
@@ -85,10 +85,11 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub(crate) type AsyncJob =
     dyn FnMut(JobId) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync;
-pub(crate) type AsyncJobBoxed = Arc<RwLock<Box<AsyncJob>>>;
+pub(crate) type AsyncJobBoxed = Arc<tokio::sync::RwLock<Box<AsyncJob>>>;
 
 /// Represents `SACS` specific errors.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     /// Error during shutdown of any component due to `Tokio` runtime or `thread` error.
     #[error("unable to complete shutdown request")]
@@ -120,12 +121,27 @@ pub enum Error {
     /// Incorrect operation with system time
     #[error("unable to convert system time")]
     SystemTimeOperation(#[from] std::time::SystemTimeError),
+    /// Task's cron schedule has no upcoming occurrence (e.g. it points to an impossible
+    /// calendar date, or lies entirely in the past), so it can never be scheduled.
+    #[error("cron schedule has no upcoming occurrence")]
+    NoUpcomingEvent,
+    /// Task's schedule requires time arithmetic (delay or interval) that overflows the
+    /// representable range of `SystemTime`.
+    #[error("task schedule duration overflows representable system time range")]
+    ScheduleOverflow,
+    /// Requested worker configuration is invalid, e.g. zero worker threads.
+    #[error("invalid worker configuration")]
+    InvalidWorkerConfig,
+    /// Scheduler's background loop has terminated, so it can't accept new requests
+    /// and its state should be considered stale.
+    #[error("scheduler has terminated and can't process requests anymore")]
+    SchedulerTerminated,
 }
 
 #[derive(Debug)]
 struct ControlChannel<T: Debug> {
     sender: Sender<T>,
-    receiver: RwLock<Receiver<T>>,
+    receiver: Mutex<Receiver<T>>,
 }
 
 impl<T: Debug> ControlChannel<T> {
@@ -133,12 +149,8 @@ impl<T: Debug> ControlChannel<T> {
         let (sender, receiver) = mpsc::channel::<T>(size);
         Self {
             sender,
-            receiver: RwLock::new(receiver),
+            receiver: Mutex::new(receiver),
         }
-    }
-
-    async fn send(&self, event: T) -> Result<(), SendError<T>> {
-        self.sender.send(event).await
     }
 
     fn sender(&self) -> Sender<T> {
@@ -146,13 +158,16 @@ impl<T: Debug> ControlChannel<T> {
     }
 
     async fn receive(&self) -> Option<T> {
-        self.receiver.write().await.recv().await
+        self.receiver.lock().await.recv().await
     }
 
-    async fn send_event(&self, event: T) -> Result<()> {
-        self.send(event)
-            .await
-            .map_err(|_e| Error::SendingChangeStateEvent)
+    /// Best-effort, non-blocking send for fungible "something changed, wake up and
+    /// reconsider" notifications, where losing one under backpressure is harmless because
+    /// the receiver always re-derives its own next action from shared state rather than
+    /// from the notification's payload (see `Queue`'s wake-up channel). Never blocks the
+    /// sender.
+    fn notify(&self, event: T) {
+        let _ = self.sender.try_send(event);
     }
 }
 

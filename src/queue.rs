@@ -43,7 +43,7 @@ pub(crate) trait EventTimeQueue: Debug {
         self.insert(Event::with_id(id)).await
     }
 
-    /// Remove event from the queue at it's time position.
+    /// Remove event from the queue at its time position.
     #[allow(dead_code)]
     async fn remove(&self, event: &Event) -> Result<()>;
     /// Removes all event's instances at all times.
@@ -220,9 +220,17 @@ impl EventTimeQueue for Queue {
             }
         }
 
-        self.control_channel
-            .send_event(ChangeStateEvent::QueueUpdated)
-            .await
+        // Best-effort wake-up: `next()` always re-derives the actual next event from
+        // `by_time` itself, so a dropped notification under backpressure only costs a
+        // (harmless) delay until the next notification or timeout, never a wrong or missed
+        // event. Blocking here instead would be a real hazard: `next()` is polled from the
+        // very same task that reaches this code (as one branch of `Scheduler::work`'s
+        // `select!`, itself invoked while handling a different branch), so a sustained burst
+        // of calls into this method while that other branch keeps winning could otherwise
+        // fill this channel with nothing left to ever drain it, deadlocking the whole
+        // scheduler loop.
+        self.control_channel.notify(ChangeStateEvent::QueueUpdated);
+        Ok(())
     }
 
     async fn remove(&self, event: &Event) -> Result<()> {
@@ -232,9 +240,8 @@ impl EventTimeQueue for Queue {
             Queue::remove_event_from_index(event, &mut index).await?;
         }
 
-        self.control_channel
-            .send_event(ChangeStateEvent::QueueUpdated)
-            .await
+        self.control_channel.notify(ChangeStateEvent::QueueUpdated);
+        Ok(())
     }
 
     async fn pop(&self, id: &EventId) -> Result<Vec<SystemTime>> {
@@ -258,20 +265,14 @@ impl EventTimeQueue for Queue {
             }
         }
 
-        self.control_channel
-            .send_event(ChangeStateEvent::QueueUpdated)
-            .await?;
+        self.control_channel.notify(ChangeStateEvent::QueueUpdated);
         Ok(return_times)
     }
 
     async fn shutdown(&self) {
         debug!("shutdown requested");
         self.index.write().await.clear();
-
-        let _result = self
-            .control_channel
-            .send_event(ChangeStateEvent::Shutdown)
-            .await;
+        self.control_channel.notify(ChangeStateEvent::Shutdown);
     }
 }
 
@@ -393,9 +394,22 @@ mod test {
         let next = queue.next().await.unwrap();
         assert_eq!(next.id(), id_2);
 
-        queue.push(id_1.clone()).await.unwrap();
-        queue.push(id_1.clone()).await.unwrap();
-        queue.push(id_1.clone()).await.unwrap();
+        // Explicit, distinct times instead of three back-to-back `push()`/`SystemTime::now()`
+        // calls: consecutive `now()` calls can return the same instant on a fast/optimized
+        // build (the `by_id` index is a `BTreeSet<SystemTime>`, so a collision silently
+        // dedupes two of the three instances), which made this assertion flaky under
+        // `--release`. Distinct times make the three-instances-purged-together behavior this
+        // test is actually about deterministic instead of depending on clock resolution.
+        let now = SystemTime::now();
+        queue.insert(Event::new(id_1.clone(), now)).await.unwrap();
+        queue
+            .insert(Event::new(id_1.clone(), now + Duration::from_secs(1)))
+            .await
+            .unwrap();
+        queue
+            .insert(Event::new(id_1.clone(), now + Duration::from_secs(2)))
+            .await
+            .unwrap();
         queue.push(id_2.clone()).await.unwrap();
 
         let removed = queue.pop(&id_1).await.unwrap().len();

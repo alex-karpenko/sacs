@@ -4,13 +4,12 @@ categories = ["asynchronous"]
 description = "Simple Async Cron Scheduler for Tokio"
 edition = "2021"
 rust-version = "1.89"
-homepage = "https://github.com/alex-karpenko/sacs"
 keywords = ["cron", "async", "job", "scheduler", "tokio"]
 license = "MIT"
 name = "sacs"
 readme = "README.md"
 repository = "https://github.com/alex-karpenko/sacs"
-version = "0.9.5"
+version = "0.10.0"
 exclude = [".github/**", ".vscode/**", "TODO.md", "Cargo.lock", "target/**", ".gitignore", "mutants.*/**"]
 
 [dependencies]

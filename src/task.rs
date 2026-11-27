@@ -3,10 +3,10 @@
 //!
 //! Module contains everything related to [`Task`], its [`TaskSchedule`] and [`state`](TaskStatus).
 //!
-use crate::{event::EventId, job::JobId, AsyncJobBoxed, Error};
-use chrono::{DateTime, Local};
+use crate::{event::EventId, format_local_time, job::JobId, AsyncJobBoxed, Error};
 use cron_lite::Schedule;
 use futures::Future;
+use jiff::ZonedDateTime;
 use std::{
     collections::BTreeSet,
     fmt::Display,
@@ -601,7 +601,7 @@ pub(crate) struct TaskState {
 impl std::fmt::Debug for TaskState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let last_finished_at = if let Some(last_finished_at) = self.last_finished_at {
-            format!("{}", DateTime::<Local>::from(last_finished_at))
+            format_local_time(last_finished_at)
         } else {
             "None".to_string()
         };
@@ -776,7 +776,11 @@ impl TaskState {
 /// For more information about valid cron expressions,
 /// please refer to [cron-lite](https://docs.rs/cron-lite/) crate documentation.
 ///
-/// It's possible to use cron expression with timezone if `tz` feature is enabled.
+/// An expression without a timezone is evaluated in the system's local timezone. To use a specific timezone,
+/// prefix the expression with `TZ=<timezone name>`, e.g. `TZ=Europe/Kyiv 0 12 * * *`. Timezone names are resolved
+/// at runtime from the operating system's timezone database, so the parsing of such an expression fails with
+/// [`Error::InvalidCronExpression`] if the timezone is unknown or the database (e.g. `tzdata` package) is missing,
+/// see the [crate documentation](crate#cron-schedules-with-timezone) for details.
 ///
 /// ## Examples
 ///
@@ -792,6 +796,9 @@ impl TaskState {
 ///
 /// // Every even year every 10 seconds at 9:00-9:01am on January 1st.
 /// let something_senseless: CronSchedule = "*/10 0 9 1 1 ? */2".try_into().unwrap();
+///
+/// // Every day at noon, Kyiv time, regardless of the system's local timezone.
+/// let kyiv_noon: CronSchedule = "TZ=Europe/Kyiv 0 12 * * *".try_into().unwrap();
 /// ```
 ///
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -809,8 +816,12 @@ impl CronSchedule {
     /// Returns the next occurrence of the schedule, or `None` if there is none (e.g. an
     /// impossible calendar date, a past-only year, or any schedule beyond the underlying
     /// cron engine's representable range).
+    ///
+    /// A schedule without an explicit `TZ=` prefix is evaluated in the system's local timezone.
     fn upcoming(&self) -> Option<SystemTime> {
-        self.schedule.upcoming(&Local::now()).map(SystemTime::from)
+        self.schedule
+            .upcoming(&ZonedDateTime::now())
+            .and_then(|next| SystemTime::try_from(next).ok())
     }
 }
 
@@ -1351,7 +1362,7 @@ mod test {
         assert_eq!(state.status(), TaskStatus::Finished);
         assert!(state.is_task_finished());
         assert!(state.last_finished_at().is_some());
-        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 1, canceled: 2, timeouts: 1, errors: 1, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"{}\" }}", DateTime::<Local>::from(state.last_finished_at().unwrap())));
+        assert_eq!(format!("{state:?}"), format!("TaskState {{ waiting: 0, scheduled: 0, running: 0, completed: 1, canceled: 2, timeouts: 1, errors: 1, scheduled_jobs: {{}}, running_jobs: {{}}, last_finished_at: \"{}\" }}", format_local_time(state.last_finished_at().unwrap())));
         assert_eq!(
             state.statistics,
             TaskStatistics {
@@ -1490,6 +1501,45 @@ mod test {
         // February 30th never exists.
         let cron: CronSchedule = "0 0 0 30 2 *".try_into().unwrap();
         assert_eq!(cron.upcoming(), None);
+    }
+
+    #[test]
+    fn cron_schedule_with_timezone_fires_at_zone_local_time() {
+        for zone in ["UTC", "Europe/Kyiv", "America/New_York", "Asia/Tokyo"] {
+            let cron: CronSchedule = format!("TZ={zone} 30 12 * * *")
+                .as_str()
+                .try_into()
+                .unwrap();
+            assert_eq!(cron.to_string(), format!("TZ={zone} 0 30 12 * * * *"));
+
+            let next = cron.upcoming().unwrap();
+            assert!(next > SystemTime::now());
+            assert!(next <= SystemTime::now() + Duration::from_secs(25 * 60 * 60));
+
+            let tz = jiff::tz::TimeZone::get(zone).unwrap();
+            let next = jiff::Timestamp::try_from(next)
+                .unwrap()
+                .to_zoned_datetime(tz);
+            assert_eq!(
+                (next.hour(), next.minute(), next.second()),
+                (12, 30, 0),
+                "{zone}: {next}"
+            );
+        }
+    }
+
+    #[test]
+    fn cron_schedule_with_unknown_timezone_is_rejected() {
+        let result: Result<CronSchedule> = "TZ=Nowhere/Atlantis 0 12 * * *".try_into();
+        assert!(
+            matches!(
+                result,
+                Err(Error::InvalidCronExpression(
+                    cron_lite::error::CronError::InvalidTimeZone(ref tz)
+                )) if tz == "Nowhere/Atlantis"
+            ),
+            "{result:?}"
+        );
     }
 
     #[test]

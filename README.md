@@ -66,9 +66,20 @@ async fn main() -> Result<()> {
 }
 ```
 
+## Cron schedules with timezone
+
+A cron expression without a timezone is evaluated in the system's local timezone. To pin a schedule to a specific
+timezone, prefix the expression with `TZ=`, for example `TZ=Europe/Kyiv 0 12 * * *` or `TZ=UTC @daily`,
+see [`cron-lite`](https://docs.rs/cron-lite/) documentation for details.
+
+Timezone names are resolved at runtime from the operating system's timezone database (on Unix, `/usr/share/zoneinfo`
+or the directory set in the `TZDIR` environment variable). Make sure `tzdata` is installed wherever your application
+runs: minimal container images (distroless, scratch, Alpine without the `tzdata` package) don't have it, and any `TZ=`
+schedule fails to parse there with `Error::InvalidCronExpression`.
+
 ## Feature flags
 
-- `tz` - enables cron schedules with timezone, see [`cron-lite`](https://docs.rs/cron-lite/) documentation for details.
+- `async-trait` - declares `TaskScheduler` methods as `async fn` instead of functions returning `impl Future + Send`.
 
 ## Breaking changes & migration
 
@@ -76,9 +87,14 @@ async fn main() -> Result<()> {
 
 - [`Error`](https://docs.rs/sacs/latest/sacs/enum.Error.html) is now `#[non_exhaustive]` --
   an exhaustive `match` on it needs a wildcard arm.
-- The `cron-lite` dependency was updated to `0.4.0`; its `CronError` variants changed shape
+- The `cron-lite` dependency was updated to `0.5.0`; its `CronError` variants changed shape
   (tuple to struct fields) and it is also `#[non_exhaustive]` now. Update any code that
   destructures `Error::InvalidCronExpression(cron_lite::error::CronError::...)`.
+- `chrono` and `chrono-tz` were replaced by [`jiff`](https://docs.rs/jiff), and the `tz` feature
+  was removed: `TZ=`-prefixed cron schedules are always supported now. Remove `features = ["tz"]`
+  from your `Cargo.toml`, otherwise Cargo rejects the dependency. Timezone data no longer ships
+  inside the binary; it's read from the operating system at runtime, see
+  [Cron schedules with timezone](#cron-schedules-with-timezone).
 - [`TaskScheduler::cancel`](https://docs.rs/sacs/latest/sacs/scheduler/trait.TaskScheduler.html#tymethod.cancel)
   now returns `Err(Error::IncorrectTaskId)` for an unknown or already-finished task id, matching
   its documented contract, instead of always returning `Ok(())`.

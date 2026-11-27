@@ -732,12 +732,11 @@ async fn n7_unknown_job_state_does_not_kill_loop() {
 }
 
 // ---------------------------------------------------------------------------------------
-// Step 16 / N10: the `tz` feature is otherwise only compile-tested by feature-powerset CI;
-// this proves a `TZ=`-prefixed cron schedule actually drives real scheduling end-to-end
-// rather than merely parsing.
+// Step 16 / N10: proves a `TZ=`-prefixed cron schedule actually drives real scheduling
+// end-to-end rather than merely parsing. Since cron-lite 0.5.0 timezone support is always
+// enabled (no `tz` feature anymore), so this runs unconditionally.
 // ---------------------------------------------------------------------------------------
 
-#[cfg(feature = "tz")]
 #[tokio::test]
 #[timeout(10000)]
 async fn n10_tz_cron_schedule_drives_real_scheduling() {

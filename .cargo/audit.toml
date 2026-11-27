@@ -1,0 +1,6 @@
+[advisories]
+# TODO: temporary exceptions, remove once chrono/chrono-tz are replaced (e.g. by jiff) here and in cron-lite
+ignore = [
+    "RUSTSEC-2026-0543", # chrono is unmaintained
+    "RUSTSEC-2026-0555", # chrono-tz is unmaintained
+]
